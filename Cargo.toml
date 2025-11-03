@@ -1,0 +1,36 @@
+[package]
+name = "nexel24"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+dx = []                # enables DX RAM, faster DMA paths
+debug-ui = []          # enables SDL2/egui debug overlays
+fast-math = []         # optional VLU approximations
+serde-spec = ["serde", "serde_yaml", "serde_json"]
+
+[dependencies]
+anyhow = "1"
+thiserror = "2.0.17"
+bitflags = "2"
+bitvec = "1"
+log = "0.4"
+env_logger = "0.11"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_yaml = { version = "0.9.34-deprecated", optional = true }
+serde_json = { version = "1", optional = true }
+
+# optional frontend
+sdl2 = { version = "0.38.0", optional = true }
+
+[dev-dependencies]
+criterion = "0.7.0"
+pretty_assertions = "1"
+
+[lib]
+name = "nexel_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nexel24"
+path = "src/main.rs"

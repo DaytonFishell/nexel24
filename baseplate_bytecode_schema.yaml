@@ -1,0 +1,479 @@
+# Baseplate VM Bytecode Schema v0.3 (for Nexel-24 / HX-1)
+meta:
+  name: Baseplate VM
+  version: 0.3
+  target_console: Nexel-24 (HX-1)
+  bytecode_word_bytes: 3        # 24-bit packing-friendly
+  endian: little                 # stream is little-endian for 16/24-bit fields
+  alignment: 3                   # all instructions aligned to 3 bytes
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  MODULE CONTAINER (.bpx inside .nxl)
+# ──────────────────────────────────────────────────────────────────────────────
+container:
+  file_extension: .bpx
+  layout:
+    - header
+    - constant_pool
+    - code_sections
+    - metadata
+  header:
+    magic: "BPX0"            # 4 bytes
+    version: 0x0003          # 2 bytes
+    flags:                   # 2 bytes bitfield
+      - little_endian
+      - has_debug_names
+      - uses_handles
+    section_ptrs:            # 24-bit offsets from file start (3 bytes each)
+      cp_offset: 24bit
+      code_offset: 24bit
+      meta_offset: 24bit
+    entry_function_id: 16bit # index into function table
+    crc32: 32bit             # whole module CRC
+  constant_pool:
+    layout:
+      - numbers
+      - strings
+      - functions
+      - blobs
+    number_format:
+      int24:                 # signed, stored in 3 bytes
+        encoding: twos_complement
+      fixed16_16:            # 32-bit, but tagged in VM
+        encoding: "16.16"
+    strings:
+      encoding: utf8
+      table:                 # string table with dedup
+        - len16, bytes...
+    functions:
+      table_entry:
+        name_idx: 16bit_or_ffff
+        code_offset: 24bit
+        code_size: 24bit
+        num_locals: 16bit
+        num_params: 8bit
+        max_stack: 8bit
+    blobs:
+      purpose: ["bytecode_embeds","patch_data","lookup_tables"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  INSTRUCTION ENCODING
+# ──────────────────────────────────────────────────────────────────────────────
+encoding:
+  opcode_byte: 1
+  operand_kinds:
+    reg:   8bit               # R0..R15 (VM virtual regs) or small slot id
+    imm8:  8bit
+    imm16: 16bit_little
+    imm24: 24bit_little
+    kidx:  16bit              # constant-pool index (numbers/strings)
+    fidx:  16bit              # function index
+    hidx:  16bit              # handle table index
+    uptr:  24bit              # unsafe ptr (verifier forbids in sandbox)
+  layouts:
+    # Each instruction occupies 3, 6, or 9 bytes (1,2,3 words)
+    W1: [opcode]              # 3 bytes total (opcode + 2 pad bytes reserved=0)
+    W2: [opcode, op1, op2]    # 6 bytes (operands are 1 or 2 bytes; pad to 3)
+    W3: [opcode, op1, op2, op3] # 9 bytes
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  REGISTER/STACK MODEL
+# ──────────────────────────────────────────────────────────────────────────────
+vm_model:
+  registers: 16               # R0..R15 (caller-saved), R15 dedicated as SP in VM
+  stack:                      # Operand stack distinct from call stack
+    max_depth: 255
+    growth: up
+  calling_convention:
+    params: pushed_left_to_right
+    returns: top_of_stack
+    callee_preserved: []
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  OPCODES (canonical)
+# ──────────────────────────────────────────────────────────────────────────────
+# Fields:
+# - id: numeric opcode (0..255)
+# - size: W1/W2/W3
+# - operands: list of operand kinds
+# - stack: effect in "pop -> push" form
+# - cycles: nominal interpreter cost (for quota)
+# - class: group for verifier & optimizer
+# - notes: semantics
+opcodes:
+  # --- Control flow
+  - name: NOP
+    id: 0
+    size: W1
+    operands: []
+    stack: "—"
+    cycles: 1
+    class: control
+    notes: "No operation."
+
+  - name: HALT
+    id: 1
+    size: W1
+    operands: []
+    stack: "—"
+    cycles: 1
+    class: control
+    notes: "Abort current fiber."
+
+  - name: JMP
+    id: 2
+    size: W2
+    operands: [imm24]
+    stack: "—"
+    cycles: 2
+    class: control
+    notes: "Absolute bytecode address."
+
+  - name: JMPR
+    id: 3
+    size: W2
+    operands: [imm16]
+    stack: "—"
+    cycles: 2
+    class: control
+    notes: "PC-relative jump (+/- 32K)."
+
+  - name: CALL
+    id: 4
+    size: W2
+    operands: [fidx, imm8]     # argc
+    stack: "pop argc -> push ret"
+    cycles: 8
+    class: call
+
+  - name: RET
+    id: 5
+    size: W1
+    operands: []
+    stack: "pop ret -> —"
+    cycles: 6
+    class: call
+
+  - name: IF_TRUE
+    id: 6
+    size: W2
+    operands: [imm24]
+    stack: "pop cond -> —"
+    cycles: 3
+    class: control
+    notes: "Jump if cond != false/nil/0."
+
+  - name: IF_FALSE
+    id: 7
+    size: W2
+    operands: [imm24]
+    stack: "pop cond -> —"
+    cycles: 3
+    class: control
+
+  # --- Constants & locals
+  - name: LDK
+    id: 16
+    size: W2
+    operands: [kidx]
+    stack: "— -> push K[kidx]"
+    cycles: 2
+    class: load
+
+  - name: LDI
+    id: 17
+    size: W2
+    operands: [imm24]
+    stack: "— -> push imm24(int)"
+    cycles: 2
+    class: load
+
+  - name: MOV
+    id: 18
+    size: W2
+    operands: [reg, reg]
+    stack: "—"
+    cycles: 1
+    class: move
+
+  - name: LDR
+    id: 19
+    size: W2
+    operands: [reg]
+    stack: "— -> push R[reg]"
+    cycles: 1
+    class: load
+
+  - name: STR
+    id: 20
+    size: W2
+    operands: [reg]
+    stack: "pop v -> — ; R[reg]=v"
+    cycles: 1
+    class: store
+
+  # --- Arithmetic (int24 / fixed16.16)
+  - name: ADD
+    id: 32
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a+b)"
+    cycles: 2
+    class: alu
+
+  - name: SUB
+    id: 33
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a-b)"
+    cycles: 2
+    class: alu
+
+  - name: MUL
+    id: 34
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a*b)"
+    cycles: 4
+    class: alu
+
+  - name: DIV
+    id: 35
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a/b)"
+    cycles: 8
+    class: alu
+
+  - name: NEG
+    id: 36
+    size: W1
+    operands: []
+    stack: "pop a -> push (-a)"
+    cycles: 1
+    class: alu
+
+  - name: AND
+    id: 37
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a & b)"
+    cycles: 1
+    class: bitwise
+
+  - name: OR
+    id: 38
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a | b)"
+    cycles: 1
+    class: bitwise
+
+  - name: XOR
+    id: 39
+    size: W1
+    operands: []
+    stack: "pop a,b -> push (a ^ b)"
+    cycles: 1
+    class: bitwise
+
+  - name: SHL
+    id: 40
+    size: W1
+    operands: []
+    stack: "pop a,n -> push (a << n)"
+    cycles: 1
+    class: bitwise
+
+  - name: SHR
+    id: 41
+    size: W1
+    operands: []
+    stack: "pop a,n -> push (a >> n)"
+    cycles: 1
+    class: bitwise
+
+  # --- Comparison
+  - name: CMP_EQ
+    id: 48
+    size: W1
+    operands: []
+    stack: "pop a,b -> push bool"
+    cycles: 1
+    class: compare
+
+  - name: CMP_LT
+    id: 49
+    size: W1
+    operands: []
+    stack: "pop a,b -> push bool"
+    cycles: 1
+    class: compare
+
+  - name: CMP_LE
+    id: 50
+    size: W1
+    operands: []
+    stack: "pop a,b -> push bool"
+    cycles: 1
+    class: compare
+
+  # --- Tables/arrays (handle-backed)
+  - name: ARR_NEW
+    id: 64
+    size: W2
+    operands: [imm16]   # capacity hint
+    stack: "— -> push handle"
+    cycles: 6
+    class: table
+
+  - name: ARR_GET
+    id: 65
+    size: W1
+    operands: []
+    stack: "pop arrH, idx -> push value"
+    cycles: 4
+    class: table
+
+  - name: ARR_SET
+    id: 66
+    size: W1
+    operands: []
+    stack: "pop arrH, idx, val -> —"
+    cycles: 4
+    class: table
+
+  # --- Strings
+  - name: STR_CAT
+    id: 72
+    size: W1
+    operands: []
+    stack: "pop a,b -> push concat"
+    cycles: 16
+    class: string
+
+  # --- VM/System
+  - name: YIELD
+    id: 80
+    size: W1
+    operands: []
+    stack: "—"
+    cycles: 1
+    class: system
+    notes: "Cooperative fiber yield."
+
+  - name: TIME_NOW
+    id: 81
+    size: W1
+    operands: []
+    stack: "— -> push ms"
+    cycles: 2
+    class: system
+
+  # --- Video API (Baseplate → VDP list build)
+  - name: TEX_CREATE
+    id: 96
+    size: W3
+    operands: [imm16, imm16, imm8]   # w,h,format
+    stack: "— -> push TexHandle"
+    cycles: 16
+    class: video
+
+  - name: SPR_CREATE
+    id: 97
+    size: W2
+    operands: [reg]                  # tex in Rn (or top-of-stack by conv)
+    stack: "pop x,y -> push SpriteHandle"
+    cycles: 8
+    class: video
+
+  - name: SPR_SET_POS
+    id: 98
+    size: W1
+    operands: []
+    stack: "pop sprH, x, y -> —"
+    cycles: 2
+    class: video
+
+  - name: FRAME_SUBMIT
+    id: 99
+    size: W1
+    operands: []
+    stack: "—"
+    cycles: 4
+    class: video
+    notes: "Seal command list and schedule DMA on VBlank."
+
+  # --- Audio API
+  - name: PCM_PLAY
+    id: 112
+    size: W2
+    operands: [reg, imm8]            # buf handle, loop(0/1)
+    stack: "—"
+    cycles: 8
+    class: audio
+
+  - name: FM_NOTE
+    id: 113
+    size: W2
+    operands: [imm8, imm8, imm8, imm8]  # ch, patch, note, vel
+    stack: "—"
+    cycles: 6
+    class: audio
+
+  # --- Math/VLU API
+  - name: VLU_XFORM
+    id: 128
+    size: W2
+    operands: [reg, reg]             # v, m
+    stack: "— -> push v'"
+    cycles: 12
+    class: math
+
+  - name: VLU_DOT
+    id: 129
+    size: W1
+    operands: []
+    stack: "pop a,b -> push dot"
+    cycles: 6
+    class: math
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  SUPER-INSTRUCTIONS (peephole packed)
+# ──────────────────────────────────────────────────────────────────────────────
+superops:
+  - name: ARR_IDX_ADD
+    expands: ["ARR_GET", "LDI", "ADD"]
+    benefit: "Collapses 3 dispatches into 1 for tight loops."
+
+  - name: TEX_SPR_DRAW
+    expands: ["TEX_CREATE", "SPR_CREATE", "SPR_SET_POS", "FRAME_SUBMIT"]
+    benefit: "Bootstrap draw in 1 call (demo scenes)."
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  VERIFIER RULES
+# ──────────────────────────────────────────────────────────────────────────────
+verifier:
+  stack_rules:
+    max_depth: 255
+    balanced_on_ret: true
+    no_underflow: true
+  control_flow:
+    targets_must_align: 3
+    forward_only_in_try: true
+  handles:
+    must_own_before_use: true
+    sprite_requires_texture: true
+  sandbox:
+    forbid_opcodes: []
+    forbid_uptr: true
+  quotas:
+    instruction_quota_per_frame: 65536
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  DEBUG INFO (optional)
+# ──────────────────────────────────────────────────────────────────────────────
+debug_info:
+  names_table: optional
+  file_table: optional
+  line_table: optional

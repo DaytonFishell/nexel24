@@ -1,0 +1,516 @@
+{
+  "meta": {
+    "author": "Asher Fisc",
+    "version": "1.2",
+    "description": "A 24-bit alternate-timeline game console uniting 16-bit efficiency with early 3D capability. Includes the Baseplate VM runtime, development stack, and system OS specification."
+  },
+  "hardware": {
+    "cpu": {
+      "model": "HXC-24",
+      "clock_mhz": 18.432,
+      "data_width_bits": 16,
+      "address_width_bits": 24,
+      "registers": {
+        "general_purpose": 8,
+        "special": [
+          "A",
+          "X",
+          "Y",
+          "SP",
+          "PC",
+          "SR"
+        ]
+      },
+      "alu": {
+        "operations": [
+          "add",
+          "sub",
+          "adc",
+          "sbc",
+          "and",
+          "or",
+          "xor",
+          "shift",
+          "rotate",
+          "bcd_add"
+        ],
+        "multiply": {
+          "width": "24x24",
+          "latency_cycles": 4
+        },
+        "divide": {
+          "width": "24/24",
+          "latency_cycles": "8-12"
+        }
+      },
+      "pipeline": "2-stage",
+      "cache": "none",
+      "mmu": false,
+      "bus": {
+        "address_lines": 24,
+        "data_lines": 16,
+        "timing": {
+          "load_store_24bit": "2_cycles",
+          "branch_penalty": "1_cycle"
+        }
+      },
+      "coprocessor_ports": [
+        {
+          "name": "VLU-24",
+          "address": "0x108000",
+          "irq": "VLU_DONE"
+        },
+        {
+          "name": "APU-6",
+          "address": "0x10C000",
+          "irq": "APU_DONE"
+        },
+        {
+          "name": "VDP-T",
+          "address": "0x100000",
+          "irq": "VBLANK"
+        }
+      ],
+      "interrupts_priority": [
+        "NMI",
+        "HBLANK",
+        "DMA_DONE",
+        "VLU_DONE",
+        "APU_BUF_EMPTY",
+        "TIMER0",
+        "TIMER1",
+        "TIMER2",
+        "PAD_EVENT",
+        "SWI"
+      ],
+      "instruction_set": {
+        "core": [
+          "LDA",
+          "STA",
+          "LDX",
+          "STX",
+          "ADD",
+          "SUB",
+          "JMP",
+          "JSR",
+          "RTS",
+          "BRA",
+          "BNE",
+          "BEQ",
+          "SEI",
+          "CLI",
+          "COP",
+          "HLT"
+        ],
+        "extensions": [
+          "MUL",
+          "DIV",
+          "BSET",
+          "BCLR",
+          "BIT",
+          "WFI",
+          "MOV",
+          "INC",
+          "DEC"
+        ]
+      }
+    },
+    "coprocessors": {
+      "VLU-24": {
+        "role": "vector_math_engine",
+        "supported_formats": [
+          "24.8_fixed",
+          "16.16_fixed"
+        ],
+        "operations": [
+          "dot",
+          "cross",
+          "matrix_mul",
+          "matrix_transform",
+          "perspective_divide",
+          "rsqrt"
+        ],
+        "vector_registers": 16,
+        "throughput": "1_vector_MAC_per_2_cycles",
+        "result_buffer_size_kib": 4
+      },
+      "APU-6": {
+        "role": "audio_processor",
+        "channels": {
+          "pcm": 2,
+          "fm": 2,
+          "wavetable": 1,
+          "noise": 1
+        },
+        "dsp_effects": [
+          "echo",
+          "chorus",
+          "eq"
+        ],
+        "sample_ram_kib": 64,
+        "output_rate_khz": [
+          32,
+          44.1
+        ],
+        "bit_depth": 16
+      },
+      "VDP-T": {
+        "role": "tile_sprite_gpu",
+        "resolution_native": [
+          384,
+          288
+        ],
+        "modes": [
+          "320x240",
+          "256x224"
+        ],
+        "vram_kib": 512,
+        "cram_kib": 64,
+        "layers": [
+          {
+            "BG0": "affine_supported"
+          },
+          {
+            "BG1": "static_tilemap"
+          }
+        ],
+        "sprites": {
+          "max_on_screen": 128,
+          "max_per_line": 64,
+          "max_size": [
+            64,
+            64
+          ]
+        },
+        "polygons": {
+          "max_flat_triangles_per_sec": 4000
+        },
+        "color_depth_bits": 18,
+        "transparency_modes": [
+          "color_key",
+          "half_blend"
+        ],
+        "dma_modes": [
+          "immediate",
+          "vblank",
+          "hblank"
+        ],
+        "interrupts": [
+          "VBLANK",
+          "HBLANK",
+          "LINECMP",
+          "CMDEND"
+        ]
+      }
+    },
+    "memory": {
+      "total_addressable_space_bytes": 16777216,
+      "map": [
+        {
+          "region": "WorkRAM",
+          "start": "0x000000",
+          "end": "0x00FFFF",
+          "size_kib": 64,
+          "description": "Primary stack/heap"
+        },
+        {
+          "region": "ExpandedRAM",
+          "start": "0x010000",
+          "end": "0x03FFFF",
+          "size_kib": 192
+        },
+        {
+          "region": "IO",
+          "start": "0x100000",
+          "end": "0x10FFFF",
+          "size_kib": 64
+        },
+        {
+          "region": "VRAM",
+          "start": "0x200000",
+          "end": "0x27FFFF",
+          "size_kib": 512
+        },
+        {
+          "region": "CRAM",
+          "start": "0x280000",
+          "end": "0x28FFFF",
+          "size_kib": 64
+        },
+        {
+          "region": "CartROM",
+          "start": "0x400000",
+          "end": "0x9FFFFF",
+          "size_mib": 12
+        },
+        {
+          "region": "CartSave",
+          "start": "0xA00000",
+          "end": "0xA3FFFF",
+          "size_kib": 256
+        },
+        {
+          "region": "BIOS",
+          "start": "0xFF0000",
+          "end": "0xFFFFFF",
+          "size_kib": 64
+        }
+      ]
+    },
+    "dma": {
+      "channels": 2,
+      "trigger_modes": [
+        "immediate",
+        "hblank",
+        "vblank"
+      ],
+      "features": [
+        "stride",
+        "auto_increment",
+        "block_length",
+        "source_dest_registers"
+      ]
+    },
+    "timers": {
+      "count": 3,
+      "base_clock_hz": 27000,
+      "prescalers": [
+        1,
+        8,
+        64,
+        256
+      ],
+      "irq_on_zero": true
+    },
+    "controllers": {
+      "ports": 2,
+      "digital_buttons": 6,
+      "analog_axes": 2,
+      "sample_rate_hz": 1000,
+      "expansion_port": "UART@115200bps"
+    },
+    "video_output": {
+      "standards_supported": [
+        "NTSC_59.94Hz",
+        "PAL_50Hz"
+      ],
+      "connectors": [
+        "RGB",
+        "SVideo"
+      ],
+      "pixel_clock_mhz": 12.288
+    }
+  },
+  "os": {
+    "name": "NexOS Mini",
+    "boot_sequence": [
+      "power_on_self_test",
+      "video_init",
+      "cart_header_verify",
+      "bios_vector_set",
+      "jump_entry_pc"
+    ],
+    "bios": {
+      "size_kib": 64,
+      "traps": {
+        "0x01": "joypad_read",
+        "0x02": "dma_enqueue",
+        "0x03": "apu_upload",
+        "0x04": "vdp_submit",
+        "0x05": "eeprom_read_write",
+        "0x06": "debug_uart_print",
+        "0x07": "region_query"
+      }
+    },
+    "region_codes": {
+      "00": "Free",
+      "01": "NA",
+      "10": "EU",
+      "11": "JP"
+    },
+    "boot_modes": {
+      "normal": "cartridge_autoload",
+      "dev": "menu_and_ram_loader",
+      "safe": "disable_vlu_apu"
+    }
+  },
+  "storage": {
+    "cartridge": {
+      "type": "DataCart",
+      "media": "magneto_optic",
+      "rom_capacity_mib": 12,
+      "save_eeprom_kib": "8-256",
+      "save_flash_mib": "up_to_8",
+      "header_layout": {
+        "magic": "NXL0",
+        "title": "32_ASCII",
+        "maker": "8_ASCII",
+        "version": "BCD",
+        "flags": "bitfield",
+        "rom_size": "24bit_value",
+        "save_type": [
+          "none",
+          "eeprom",
+          "flash"
+        ],
+        "entry_pc": "24bit_address",
+        "crc32": "full_rom_crc"
+      }
+    }
+  },
+  "baseplate_vm": {
+    "purpose": "Managed runtime for safe, high-level game scripting",
+    "code_format": {
+      "bytecode_word_bytes": 3,
+      "opcode_byte": 1,
+      "operand_alignment": 3,
+      "constant_pool": {
+        "numeric_formats": [
+          "int24",
+          "fixed16.16"
+        ],
+        "strings": "utf8_interned"
+      },
+      "verifier_checks": [
+        "stack_balance",
+        "bounds",
+        "type_safety",
+        "handle_lifetime"
+      ]
+    },
+    "memory": {
+      "vm_core_size_kib": 64,
+      "stdlib_size_kib": 48,
+      "heap_size_kib": "128-512",
+      "gc": {
+        "algorithm": "incremental_mark_sweep",
+        "trigger_event": "VBlank",
+        "arena_allocation": true
+      }
+    },
+    "execution": {
+      "scheduler": "cooperative_fibers",
+      "max_fibers": 32,
+      "instruction_quota_per_frame": 65536,
+      "safety": {
+        "sandbox_handles": true,
+        "capability_flags": [
+          "video",
+          "audio",
+          "math",
+          "system",
+          "io"
+        ]
+      }
+    },
+    "value_representation": {
+      "cell_bits": 32,
+      "tag_bits": 8,
+      "payload_bits": 24,
+      "type_tags": [
+        "nil",
+        "bool",
+        "int",
+        "fixed",
+        "handle",
+        "string",
+        "function",
+        "table"
+      ]
+    },
+    "handles": [
+      "TexHandle",
+      "SpriteHandle",
+      "SoundHandle",
+      "TimerHandle",
+      "VLUJob"
+    ],
+    "apis": {
+      "video": {
+        "functions": [
+          "texCreate(width,height,format)->TexHandle",
+          "spriteCreate(texture,x,y,flags)->SpriteHandle",
+          "bgAffineSet(matrix)",
+          "submitFrame()"
+        ]
+      },
+      "audio": {
+        "functions": [
+          "pcmPlay(buffer,loop)",
+          "fmNote(channel,patch,note,velocity)",
+          "mixSetEcho(level)"
+        ]
+      },
+      "math": {
+        "functions": [
+          "vluTransform(v,m)->v'",
+          "vluDot(a,b)",
+          "vluCross(a,b)",
+          "vluNormalize(v)"
+        ]
+      },
+      "system": {
+        "functions": [
+          "timeNow()",
+          "timerAfter(ms,callback)",
+          "rngNext()",
+          "saveRead(key)->bytes",
+          "saveWrite(key,bytes)"
+        ]
+      }
+    },
+    "file_extension": ".bpx",
+    "verifier": {
+      "failure_behaviors": [
+        "halt_vm",
+        "log_error",
+        "reject_module"
+      ]
+    }
+  },
+  "development": {
+    "languages_supported": [
+      "NRAW-24",
+      "BluScript-24"
+    ],
+    "sdk_components": [
+      "nraw-asm",
+      "bluscriptc",
+      "baseplate",
+      "video",
+      "audio",
+      "math",
+      "io"
+    ],
+    "emulator": {
+      "required_features": [
+        "VRAM_viewer",
+        "CRAM_viewer",
+        "Sprite_inspector",
+        "VLU_queue_monitor",
+        "UART_console"
+      ],
+      "accuracy_mode": "cycle_approx",
+      "save_states": [
+        ".nxstate"
+      ],
+      "config_file": "nexel24.yaml"
+    },
+    "sample_roms": [
+      "hello_world.nxl",
+      "vdp_demo.nxl",
+      "audio_test.nxl"
+    ],
+    "asset_pipeline": {
+      "image_format": ".pxi",
+      "audio_format": ".pxa",
+      "map_format": ".pxm"
+    },
+    "documentation": {
+      "compiler_guide": "sdk/docs/bluscript_manual.md",
+      "vm_reference": "sdk/docs/baseplate_vm.md",
+      "hardware_guide": "sdk/docs/hxc24_reference.md"
+    }
+  },
+  "philosophy": "The Nexel-24 embodies modular, parallel design: small, efficient cores that cooperate through predictable memory maps rather than abstraction layers. The Baseplate VM enables expressive creativity while maintaining deterministic behavior. Every byte and cycle is measurable, yet development remains joyful and safe from undefined behavior. \"Predictable power, playful precision.\""
+}

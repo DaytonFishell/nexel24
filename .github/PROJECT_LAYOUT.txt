@@ -1,0 +1,76 @@
+nexel24/
+├─ Cargo.toml
+├─ build.rs                    # (optional) embed spec files, git info
+├─ specs/
+│  ├─ nexel24_spec.yaml
+│  └─ baseplate_bytecode_schema.yaml
+├─ assets/                     # test ROMs, sample carts, palettes, fonts
+├─ src/
+│  ├─ lib.rs                   # re-exports core modules
+│  ├─ main.rs                  # simple CLI (or move to src/bin/emulator.rs)
+│  ├─ core/                    # timing, bus, memory map, traits
+│  │  ├─ mod.rs
+│  │  ├─ bus.rs
+│  │  ├─ clock.rs
+│  │  ├─ mem.rs
+│  │  └─ scheduler.rs
+│  ├─ cpu/
+│  │  ├─ mod.rs
+│  │  ├─ decode.rs
+│  │  ├─ exec.rs
+│  │  ├─ isa.rs
+│  │  └─ state.rs
+│  ├─ vdp/
+│  │  ├─ mod.rs
+│  │  ├─ regs.rs
+│  │  ├─ vram.rs
+│  │  ├─ raster.rs
+│  │  └─ dma.rs
+│  ├─ vlu/
+│  │  ├─ mod.rs
+│  │  ├─ fifo.rs
+│  │  └─ math.rs
+│  ├─ apu/
+│  │  ├─ mod.rs
+│  │  ├─ mixer.rs
+│  │  ├─ fm.rs
+│  │  ├─ pcm.rs
+│  │  └─ wavetable.rs
+│  ├─ vm/                      # Baseplate
+│  │  ├─ mod.rs
+│  │  ├─ bytecode.rs
+│  │  ├─ interp.rs
+│  │  ├─ verifier.rs
+│  │  ├─ gc.rs
+│  │  └─ api/                  # handles & safe APIs into devices
+│  │     ├─ mod.rs
+│  │     ├─ video.rs
+│  │     ├─ audio.rs
+│  │     ├─ math.rs
+│  │     └─ system.rs
+│  ├─ cart/
+│  │  ├─ mod.rs
+│  │  ├─ header.rs
+│  │  ├─ save.rs
+│  │  └─ mapper.rs
+│  ├─ bios/
+│  │  ├─ mod.rs
+│  │  └─ traps.rs
+│  ├─ io/
+│  │  ├─ mod.rs
+│  │  ├─ controllers.rs
+│  │  └─ uart.rs
+│  ├─ spec/
+│  │  ├─ mod.rs                # serde models for YAML/JSON spec
+│  │  └─ load.rs
+│  └─ frontends/
+│     ├─ cli.rs                # minimal TUI/CLI runner
+│     └─ sdl2.rs               # optional: video/audio/input via SDL2
+├─ tests/
+│  ├─ cpu_ops.rs               # unit tests by opcode
+│  ├─ dma_timing.rs
+│  ├─ vblank_order.rs
+│  └─ vm_verifier.rs
+└─ benches/
+   ├─ cpu_decode.rs
+   └─ vm_superops.rs

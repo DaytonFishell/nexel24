@@ -207,7 +207,8 @@ impl Cpu {
                 let value = bus.read_u16(self.pc);
                 self.pc = self.pc.wrapping_add(2);
                 let (result, borrow) = self.a.overflowing_sub(value);
-                self.sr.carry = !borrow; // Carry is inverted for subtraction
+                // Carry flag is set when no borrow occurs (inverted from the borrow flag)
+                self.sr.carry = !borrow;
                 self.sr.overflow = ((self.a ^ value) & (self.a ^ result) & 0x8000) != 0;
                 self.a = result;
                 self.sr.update_zn(self.a);
@@ -267,18 +268,18 @@ impl Cpu {
 
             // BRA - Branch always (relative 8-bit signed)
             0x30 => {
-                let offset = bus.read_u8(self.pc) as i8;
+                let offset = bus.read_u8(self.pc) as i8 as i32;
                 self.pc = self.pc.wrapping_add(1);
-                self.pc = (self.pc as i32 + offset as i32) as u32;
+                self.pc = self.pc.wrapping_add_signed(offset);
                 self.cycles += 2;
             }
 
             // BEQ - Branch if equal (zero set)
             0x31 => {
-                let offset = bus.read_u8(self.pc) as i8;
+                let offset = bus.read_u8(self.pc) as i8 as i32;
                 self.pc = self.pc.wrapping_add(1);
                 if self.sr.zero {
-                    self.pc = (self.pc as i32 + offset as i32) as u32;
+                    self.pc = self.pc.wrapping_add_signed(offset);
                     self.cycles += 3; // Branch taken adds cycle
                 } else {
                     self.cycles += 2;
@@ -287,10 +288,10 @@ impl Cpu {
 
             // BNE - Branch if not equal (zero clear)
             0x32 => {
-                let offset = bus.read_u8(self.pc) as i8;
+                let offset = bus.read_u8(self.pc) as i8 as i32;
                 self.pc = self.pc.wrapping_add(1);
                 if !self.sr.zero {
-                    self.pc = (self.pc as i32 + offset as i32) as u32;
+                    self.pc = self.pc.wrapping_add_signed(offset);
                     self.cycles += 3; // Branch taken adds cycle
                 } else {
                     self.cycles += 2;

@@ -32,7 +32,7 @@ impl Nexel24 {
     pub const TARGET_FPS: u64 = 60;
     
     /// Cycles per frame at 60 FPS
-    pub const CYCLES_PER_FRAME: u64 = Self::CPU_CLOCK_HZ / Self::TARGET_FPS; // ~307,200 cycles
+    pub const CYCLES_PER_FRAME: u64 = Self::CPU_CLOCK_HZ / Self::TARGET_FPS; // 307,200 cycles
 
     /// Create a new emulator instance
     pub fn new() -> Self {

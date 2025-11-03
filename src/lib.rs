@@ -9,6 +9,7 @@ pub mod vdp;
 pub mod vlu;
 pub mod apu;
 pub mod vm;
+pub mod emulator;
 
 // Re-export commonly used types
 pub use core::Bus24;
@@ -17,3 +18,4 @@ pub use vdp::Vdp;
 pub use vlu::Vlu;
 pub use apu::Apu;
 pub use vm::BaseplateVm;
+pub use emulator::{Nexel24, EmulatorStats};

@@ -1,0 +1,7 @@
+{
+    "rust-analyzer.showSyntaxTree": true,
+    "rust-analyzer.cargo.target": null,
+    "github.copilot.chat.codesearch.enabled": true,
+    "github.copilot.nextEditSuggestions.enabled": true,
+    "github.copilot.chat.executePrompt.enabled": true
+}

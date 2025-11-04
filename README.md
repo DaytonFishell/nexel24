@@ -131,7 +131,7 @@ src/
 The project includes comprehensive tests:
 
 - **14 Bus tests**: Memory region access, addressing, read-only regions
-- **24 CPU tests**: Instruction execution, flags, cycle counting, interrupt handling
+- **25 CPU tests**: Instruction execution, flags, cycle counting, interrupt handling
 - **7 Emulator tests**: Integration, frame timing, execution flow
 
 Run all tests with:

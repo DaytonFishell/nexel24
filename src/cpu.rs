@@ -175,7 +175,8 @@ impl Cpu {
 
     /// Trigger a non‑maskable interrupt (NMI)
     pub fn trigger_nmi(&mut self) {
-        // Ensure NMI is always handled first
+        // NMI has highest priority (7) and will be sorted to front of queue
+        // Insert at position 0 to ensure immediate priority
         if !self.pending_interrupts.contains(&7) {
             self.pending_interrupts.insert(0, 7);
         }
@@ -184,10 +185,14 @@ impl Cpu {
     // Handle highest priority pending interrupt if interrupts are enabled
     // Returns true if an interrupt was handled
     fn handle_interrupts(&mut self, bus: &mut Bus24) -> bool {
-        if self.sr.interrupt_disable {
-            return false;
-        }
+        // Check if there's a pending interrupt
         if let Some(&int) = self.pending_interrupts.first() {
+            // NMI (interrupt 7) is non-maskable and bypasses interrupt_disable
+            // All other interrupts are blocked when interrupt_disable is set
+            if int != 7 && self.sr.interrupt_disable {
+                return false;
+            }
+            
             // Simple vector table: each interrupt has a 24-bit address at 0xFF0000 + int*3
             let vector_addr = 0xFF0000 + (int as u32) * 3;
             let handler_addr = bus.read_u24(vector_addr);
@@ -199,7 +204,7 @@ impl Cpu {
             self.pc = handler_addr;
             // Remove handled interrupt
             self.pending_interrupts.remove(0);
-            // Interrupt servicing takes cycles (similar to JSR)
+            // Interrupt servicing takes 7 cycles (vector fetch + stack push + jump)
             self.cycles += 7;
             return true;
         }
@@ -956,6 +961,46 @@ mod tests {
         // Execute CLI
         cpu.step(&mut bus);
         assert!(!cpu.sr.interrupt_disable);
+    }
+
+    #[test]
+    fn nmi_interrupts_even_when_disabled() {
+        let mut cpu = Cpu::new();
+        let mut bus = Bus24::new();
+
+        // Set up BIOS with NMI vector
+        let mut bios = vec![0; 0x100];
+        // NMI (interrupt 7) vector at offset 0x15 (0xFF0000 + 7*3) -> 0x200000
+        bios[0x15] = 0x00;
+        bios[0x16] = 0x00;
+        bios[0x17] = 0x20;
+        // NOP at start
+        bios[0] = 0x00;
+        bus.load_bios(&bios);
+
+        cpu.pc = 0xFF0000;
+        cpu.sr.interrupt_disable = true; // Interrupts disabled
+
+        // Trigger NMI
+        cpu.trigger_nmi();
+        assert_eq!(cpu.pending_interrupts.len(), 1);
+
+        let old_pc = cpu.pc;
+
+        // Step should service NMI even though interrupts are disabled
+        cpu.step(&mut bus);
+
+        // PC should have jumped to NMI handler
+        assert_eq!(cpu.pc, 0x200000);
+        
+        // Verify that PC was pushed to stack
+        let mut test_cpu = Cpu::new();
+        test_cpu.sp = cpu.sp;
+        let popped_pc = test_cpu.pop_u24(&bus);
+        assert_eq!(popped_pc, old_pc);
+
+        // NMI should be removed from queue
+        assert_eq!(cpu.pending_interrupts.len(), 0);
     }
 
     #[test]

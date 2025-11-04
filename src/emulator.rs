@@ -320,13 +320,13 @@ mod tests {
     fn emulator_vdp_register_access() {
         let mut emu = Nexel24::new();
 
-        // Write to VDP display control register via memory bus
-        emu.write_memory(0x100000, 0x07); // Enable display and all layers
-        emu.write_memory(0x100001, 0x00);
+        // Write to VDP display control register via memory bus (little-endian)
+        emu.write_memory(0x100000, 0x07); // Low byte at lower address
+        emu.write_memory(0x100001, 0x00); // High byte at higher address
 
-        // Read back the value
-        let val_lo = emu.read_memory(0x100000);
-        let val_hi = emu.read_memory(0x100001);
+        // Read back the value (little-endian)
+        let val_lo = emu.read_memory(0x100000); // Low byte from lower address
+        let val_hi = emu.read_memory(0x100001); // High byte from higher address
         let value = (val_lo as u16) | ((val_hi as u16) << 8);
 
         assert_eq!(value, 0x07);

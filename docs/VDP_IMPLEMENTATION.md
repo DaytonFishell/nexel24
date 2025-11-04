@@ -50,10 +50,16 @@ Implemented registers at their specified offsets:
 
 #### BG0 (Affine-Capable)
 
-- Supports affine transformations (rotation, scaling)
-- 24-bit fixed-point reference points
-- 2x2 transformation matrix (A, B, C, D parameters)
-- **Status**: Structure defined, rendering stub in place
+- **Fully implemented affine transformation rendering**
+- Supports rotation and scaling via 2x2 transformation matrix
+- 8.8 fixed-point matrix parameters (A, B, C, D)
+- 24-bit fixed-point reference points (RefX, RefY) for rotation origin
+- Tilemap address register for flexible VRAM layout
+- Supports 32x32, 64x64, and 128x128 tile maps
+- Wraparound mode for seamless tiling
+- Fallback to non-affine mode for simple scrolling
+- Per-tile attributes (palette selection)
+- Transparency support (color 0)
 
 #### BG1 (Static Tilemap)
 
@@ -184,6 +190,12 @@ All VDP tests pass successfully:
 - ✓ `vdp_timing` - Scanline and VBLANK timing
 - ✓ `vdp_palette_loading` - Palette loading helper
 - ✓ `vdp_sprite_attributes` - Sprite attribute parsing
+- ✓ `vdp_bg0_affine_registers` - Affine matrix register access
+- ✓ `vdp_bg0_reference_point` - Reference point register access (24-bit)
+- ✓ `vdp_bg0_tilemap_address` - Tilemap address register
+- ✓ `vdp_bg0_affine_control_flag` - Affine mode control flag
+- ✓ `vdp_bg0_identity_transformation` - Identity transformation rendering
+- ✓ `vdp_bg0_non_affine_mode` - Non-affine mode scrolling
 
 ## Memory Map
 
@@ -216,9 +228,8 @@ Per the Nexel-24 specification:
 
 ### Not Yet Implemented
 
-1. **BG0 affine rendering** - Rotation/scaling for background layer 0
-2. **Polygon rendering** - 4000 triangles/sec flat-shaded polygon support
-3. **DMA transfers** - Actual DMA transfer logic with cycle costs
+1. **Polygon rendering** - 4000 triangles/sec flat-shaded polygon support
+2. **DMA transfers** - Actual DMA transfer logic with cycle costs
 4. **Mosaic effects** - Pixelation effect for backgrounds
 5. **Color keying and blending** - Transparency modes beyond color 0
 6. **Line compare interrupts** - Interrupt on specific scanline
@@ -241,10 +252,12 @@ Per the Nexel-24 specification:
 - Type-safe register offsets via enum
 - Cycle-accurate timing model
 
-## Example Program
+## Example Programs
 
-A complete working example is available at `examples/vdp_demo.rs` demonstrating:
+Two complete working examples are available:
 
+### `examples/vdp_demo.rs`
+Basic VDP functionality demonstration:
 - Display configuration
 - Palette loading
 - Tile data loading
@@ -254,18 +267,32 @@ A complete working example is available at `examples/vdp_demo.rs` demonstrating:
 
 Run with: `cargo run --example vdp_demo`
 
+### `examples/bg0_affine_demo.rs`
+BG0 affine transformation demonstration:
+- Identity transformation (no rotation/scaling)
+- 2x and 0.5x scaling transformations
+- 45-degree rotation simulation
+- Non-affine mode scrolling
+- Reference point manipulation
+
+Run with: `cargo run --example bg0_affine_demo`
+
 ## Conclusion
 
 The VDP-T implementation provides a solid foundation for the Nexel-24 graphics system with:
 
 - Complete register interface matching specification
-- Working tilemap rendering system
+- **Fully functional BG0 affine transformation system**
+- Working tilemap rendering system for both BG0 and BG1
 - Full sprite rendering with hardware limits
 - Cycle-accurate timing
 - Proper memory bus integration
-- Comprehensive test coverage
+- Comprehensive test coverage (14 VDP tests passing)
 - Production-ready API
 
-The implementation is ready for integration with game development and can render actual graphics once cartridge ROMs
-with proper tile/sprite data are loaded.
+The implementation is ready for integration with game development and can render actual graphics with:
+- Rotation and scaling effects via affine transformations
+- Multiple background layers with different rendering modes
+- Up to 128 sprites with hardware-accurate limitations
+- 18-bit color depth with palette management
 

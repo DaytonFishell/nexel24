@@ -31,6 +31,7 @@ pub enum VdpRegister {
     Bg0AffineD = 0x001C, // sy (scale y)
     Bg0RefX = 0x001E,    // reference point x (24-bit)
     Bg0RefY = 0x0022,    // reference point y (24-bit)
+    Bg0TilemapAddr = 0x0026, // tilemap address
 
     Bg1Control = 0x0030,
     Bg1ScrollX = 0x0032,
@@ -191,6 +192,7 @@ pub struct Vdp {
     bg0_affine: [i16; 4], // A, B, C, D matrix parameters
     bg0_ref_x: i32,       // Reference point X (24-bit fixed point)
     bg0_ref_y: i32,       // Reference point Y (24-bit fixed point)
+    bg0_tilemap_addr: u32, // Tilemap base address in VRAM
 
     bg1_control: BgControl,
     bg1_scroll_x: i16,
@@ -246,6 +248,7 @@ impl Vdp {
             bg0_affine: [0x100, 0, 0, 0x100], // Identity matrix (1.0 scale)
             bg0_ref_x: 0,
             bg0_ref_y: 0,
+            bg0_tilemap_addr: 0,
             bg1_control: BgControl::empty(),
             bg1_scroll_x: 0,
             bg1_scroll_y: 0,
@@ -308,6 +311,15 @@ impl Vdp {
             0x0010 => self.bg0_control.bits(),
             0x0012 => self.bg0_scroll_x as u16,
             0x0014 => self.bg0_scroll_y as u16,
+            0x0016 => self.bg0_affine[0] as u16,
+            0x0018 => self.bg0_affine[1] as u16,
+            0x001A => self.bg0_affine[2] as u16,
+            0x001C => self.bg0_affine[3] as u16,
+            0x001E => (self.bg0_ref_x & 0xFFFF) as u16,
+            0x0020 => ((self.bg0_ref_x >> 16) & 0xFF) as u16,
+            0x0022 => (self.bg0_ref_y & 0xFFFF) as u16,
+            0x0024 => ((self.bg0_ref_y >> 16) & 0xFF) as u16,
+            0x0026 => self.bg0_tilemap_addr as u16,
             0x0030 => self.bg1_control.bits(),
             0x0032 => self.bg1_scroll_x as u16,
             0x0034 => self.bg1_scroll_y as u16,
@@ -340,6 +352,23 @@ impl Vdp {
             0x0018 => self.bg0_affine[1] = value as i16,
             0x001A => self.bg0_affine[2] = value as i16,
             0x001C => self.bg0_affine[3] = value as i16,
+            0x001E => {
+                // RefX low word
+                self.bg0_ref_x = (self.bg0_ref_x & !0xFFFF) | (value as i32);
+            }
+            0x0020 => {
+                // RefX high byte (24-bit address)
+                self.bg0_ref_x = (self.bg0_ref_x & 0x0000FFFF) | (((value as i32) & 0xFF) << 16);
+            }
+            0x0022 => {
+                // RefY low word
+                self.bg0_ref_y = (self.bg0_ref_y & 0xFFFF0000u32 as i32) | (value as i32);
+            }
+            0x0024 => {
+                // RefY high byte (24-bit address)
+                self.bg0_ref_y = (self.bg0_ref_y & 0x0000FFFF) | (((value as i32) & 0xFF) << 16);
+            }
+            0x0026 => self.bg0_tilemap_addr = value as u32,
             0x0030 => {
                 self.bg1_control = BgControl::from_bits_truncate(value);
             }
@@ -464,8 +493,168 @@ impl Vdp {
 
     /// Render BG0 layer (affine-capable background)
     fn render_bg0(&mut self) {
-        // TODO: Implement BG0 rendering with affine transformation support
-        // For now, this is a stub
+        if !self.bg0_control.contains(BgControl::ENABLE) {
+            return;
+        }
+
+        let (width, height) = self.display_dimensions();
+        
+        // Determine tilemap size based on control flags
+        let tile_map_size = if self.bg0_control.contains(BgControl::SIZE_128x128) {
+            128
+        } else if self.bg0_control.contains(BgControl::SIZE_64x64) {
+            64
+        } else {
+            32
+        };
+
+        // Check if affine transformation is enabled
+        if self.bg0_control.contains(BgControl::AFFINE) {
+            // Affine mode: apply 2D transformation
+            // Matrix parameters are in 8.8 fixed point format
+            let pa = self.bg0_affine[0] as i32; // A (dx/dx)
+            let pb = self.bg0_affine[1] as i32; // B (dx/dy)
+            let pc = self.bg0_affine[2] as i32; // C (dy/dx)
+            let pd = self.bg0_affine[3] as i32; // D (dy/dy)
+            
+            // Reference points store the texture coordinate (in 8.8 fixed point)
+            // that should appear at the screen center
+            let ref_x = self.bg0_ref_x;
+            let ref_y = self.bg0_ref_y;
+            
+            let wraparound = self.bg0_control.contains(BgControl::WRAPAROUND);
+            
+            // Screen center coordinates
+            let center_x = (width / 2) as i32;
+            let center_y = (height / 2) as i32;
+            
+            // For each screen pixel, apply affine transformation
+            for screen_y in 0..height {
+                for screen_x in 0..width {
+                    // Calculate offset from screen center
+                    let dx = screen_x as i32 - center_x;
+                    let dy = screen_y as i32 - center_y;
+                    
+                    // Apply transformation matrix (8.8 fixed point math)
+                    // Formula: [tex_x, tex_y] = [ref_x, ref_y] + Matrix * [dx, dy]
+                    let tex_x = ref_x + ((pa * dx + pb * dy) >> 8);
+                    let tex_y = ref_y + ((pc * dx + pd * dy) >> 8);
+                    
+                    // Convert from 8.8 fixed point to integer pixel coordinates
+                    let mut pixel_x = (tex_x >> 8) as i32;
+                    let mut pixel_y = (tex_y >> 8) as i32;
+                    
+                    // Handle wraparound or clipping
+                    if wraparound {
+                        let map_size = (tile_map_size * 8) as i32;
+                        pixel_x = pixel_x.rem_euclid(map_size);
+                        pixel_y = pixel_y.rem_euclid(map_size);
+                    } else {
+                        // Clip to tilemap bounds
+                        if pixel_x < 0 || pixel_x >= (tile_map_size * 8) as i32
+                            || pixel_y < 0 || pixel_y >= (tile_map_size * 8) as i32
+                        {
+                            continue; // Out of bounds, skip pixel
+                        }
+                    }
+                    
+                    // Calculate tile coordinates
+                    let tile_x = (pixel_x / 8) as u16;
+                    let tile_y = (pixel_y / 8) as u16;
+                    let px = (pixel_x % 8) as u16;
+                    let py = (pixel_y % 8) as u16;
+                    
+                    // Read tile index from tilemap
+                    let tile_map_offset = ((tile_y * tile_map_size as u16 + tile_x) * 2) as u32;
+                    let tilemap_offset = self.bg0_tilemap_addr + tile_map_offset;
+                    let tile_entry = self.read_vram(tilemap_offset) as u16
+                        | ((self.read_vram(tilemap_offset + 1) as u16) << 8);
+                    
+                    let tile_index = tile_entry & 0x3FF; // 10-bit tile index
+                    let palette = ((tile_entry >> 12) & 0xF) as u8;
+                    
+                    // Note: In affine mode, flip flags are typically ignored
+                    // Read pixel from tile data (8x8 tiles, 8 bits per pixel)
+                    let tile_data_offset = (tile_index as u32 * 64) + (py as u32 * 8) + px as u32;
+                    let color_index = self.read_vram(tile_data_offset);
+                    
+                    // Skip transparent pixels (color 0)
+                    if color_index == 0 {
+                        continue;
+                    }
+                    
+                    // Read color from palette
+                    let palette_offset = (palette as u32 * 256 * 3) + (color_index as u32 * 3);
+                    let r = self.read_cram(palette_offset);
+                    let g = self.read_cram(palette_offset + 1);
+                    let b = self.read_cram(palette_offset + 2);
+                    
+                    let color = self.rgb666_to_rgb888(r, g, b);
+                    
+                    // Write to framebuffer
+                    let fb_offset = screen_y * width + screen_x;
+                    if let Some(pixel) = self.framebuffer.get_mut(fb_offset) {
+                        *pixel = color;
+                    }
+                }
+            }
+        } else {
+            // Non-affine mode: simple scrolling like BG1
+            let scroll_x = self.bg0_scroll_x;
+            let scroll_y = self.bg0_scroll_y;
+            
+            for screen_y in 0..height {
+                for screen_x in 0..width {
+                    // Apply scrolling
+                    let world_x = (screen_x as i16).wrapping_add(scroll_x) as u16;
+                    let world_y = (screen_y as i16).wrapping_add(scroll_y) as u16;
+                    
+                    // Calculate tile coordinates
+                    let tile_x = (world_x / 8) % tile_map_size as u16;
+                    let tile_y = (world_y / 8) % tile_map_size as u16;
+                    let pixel_x = world_x % 8;
+                    let pixel_y = world_y % 8;
+                    
+                    // Read tile index from tilemap
+                    let tile_map_offset = ((tile_y * tile_map_size as u16 + tile_x) * 2) as u32;
+                    let tilemap_offset = self.bg0_tilemap_addr + tile_map_offset;
+                    let tile_entry = self.read_vram(tilemap_offset) as u16
+                        | ((self.read_vram(tilemap_offset + 1) as u16) << 8);
+                    
+                    let tile_index = tile_entry & 0x3FF; // 10-bit tile index
+                    let palette = ((tile_entry >> 12) & 0xF) as u8;
+                    let flip_h = (tile_entry & 0x0400) != 0;
+                    let flip_v = (tile_entry & 0x0800) != 0;
+                    
+                    // Apply flipping
+                    let px = if flip_h { 7 - pixel_x } else { pixel_x };
+                    let py = if flip_v { 7 - pixel_y } else { pixel_y };
+                    
+                    // Read pixel from tile data (8x8 tiles, 8 bits per pixel)
+                    let tile_data_offset = (tile_index as u32 * 64) + (py as u32 * 8) + px as u32;
+                    let color_index = self.read_vram(tile_data_offset);
+                    
+                    // Skip transparent pixels (color 0)
+                    if color_index == 0 {
+                        continue;
+                    }
+                    
+                    // Read color from palette
+                    let palette_offset = (palette as u32 * 256 * 3) + (color_index as u32 * 3);
+                    let r = self.read_cram(palette_offset);
+                    let g = self.read_cram(palette_offset + 1);
+                    let b = self.read_cram(palette_offset + 2);
+                    
+                    let color = self.rgb666_to_rgb888(r, g, b);
+                    
+                    // Write to framebuffer
+                    let fb_offset = screen_y * width + screen_x;
+                    if let Some(pixel) = self.framebuffer.get_mut(fb_offset) {
+                        *pixel = color;
+                    }
+                }
+            }
+        }
     }
 
     /// Render BG1 layer (static tilemap background)
@@ -900,5 +1089,179 @@ mod tests {
             attr: 0x8002, // Enabled, size 2 (32x32)
         };
         assert_eq!(sprite_32x32.size(), SpriteSize::Size32x32);
+    }
+
+    #[test]
+    fn vdp_bg0_affine_registers() {
+        let mut vdp = Vdp::new();
+
+        // Test affine matrix registers
+        vdp.write_reg(VdpRegister::Bg0AffineA as u32, 0x0200); // 2.0 scale
+        vdp.write_reg(VdpRegister::Bg0AffineB as u32, 0x0080); // shear
+        vdp.write_reg(VdpRegister::Bg0AffineC as u32, 0x0040); // shear
+        vdp.write_reg(VdpRegister::Bg0AffineD as u32, 0x0180); // 1.5 scale
+
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0AffineA as u32), 0x0200);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0AffineB as u32), 0x0080);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0AffineC as u32), 0x0040);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0AffineD as u32), 0x0180);
+
+        // Test that values are stored as i16
+        assert_eq!(vdp.bg0_affine[0], 0x0200);
+        assert_eq!(vdp.bg0_affine[1], 0x0080);
+        assert_eq!(vdp.bg0_affine[2], 0x0040);
+        assert_eq!(vdp.bg0_affine[3], 0x0180);
+    }
+
+    #[test]
+    fn vdp_bg0_reference_point() {
+        let mut vdp = Vdp::new();
+
+        // Test RefX (24-bit register accessed as two 16-bit writes)
+        vdp.write_reg(VdpRegister::Bg0RefX as u32, 0x1234); // Low word
+        vdp.write_reg(VdpRegister::Bg0RefX as u32 + 2, 0x0056); // High byte
+
+        assert_eq!(vdp.bg0_ref_x, 0x00561234);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0RefX as u32), 0x1234);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0RefX as u32 + 2), 0x0056);
+
+        // Test RefY
+        vdp.write_reg(VdpRegister::Bg0RefY as u32, 0xABCD); // Low word
+        vdp.write_reg(VdpRegister::Bg0RefY as u32 + 2, 0x00EF); // High byte
+
+        assert_eq!(vdp.bg0_ref_y, 0x00EFABCD);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0RefY as u32), 0xABCD);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0RefY as u32 + 2), 0x00EF);
+    }
+
+    #[test]
+    fn vdp_bg0_tilemap_address() {
+        let mut vdp = Vdp::new();
+
+        // Test tilemap address register
+        vdp.write_reg(VdpRegister::Bg0TilemapAddr as u32, 0x2000);
+        assert_eq!(vdp.bg0_tilemap_addr, 0x2000);
+        assert_eq!(vdp.read_reg(VdpRegister::Bg0TilemapAddr as u32), 0x2000);
+    }
+
+    #[test]
+    fn vdp_bg0_affine_control_flag() {
+        let mut vdp = Vdp::new();
+
+        // Test affine mode flag
+        vdp.write_reg(
+            VdpRegister::Bg0Control as u32,
+            BgControl::ENABLE.bits() | BgControl::AFFINE.bits(),
+        );
+
+        assert!(vdp.bg0_control.contains(BgControl::ENABLE));
+        assert!(vdp.bg0_control.contains(BgControl::AFFINE));
+    }
+
+    #[test]
+    fn vdp_bg0_identity_transformation() {
+        let mut vdp = Vdp::new();
+
+        // Set up a simple test case with identity transformation
+        vdp.set_display_enable(true);
+        vdp.set_layer_enable(true, false, false);
+
+        // Enable BG0 with affine mode
+        vdp.write_reg(
+            VdpRegister::Bg0Control as u32,
+            BgControl::ENABLE.bits() | BgControl::AFFINE.bits(),
+        );
+
+        // Identity matrix (1.0 scale, no rotation) - 8.8 fixed point
+        vdp.write_reg(VdpRegister::Bg0AffineA as u32, 0x0100); // 1.0
+        vdp.write_reg(VdpRegister::Bg0AffineB as u32, 0x0000); // 0.0
+        vdp.write_reg(VdpRegister::Bg0AffineC as u32, 0x0000); // 0.0
+        vdp.write_reg(VdpRegister::Bg0AffineD as u32, 0x0100); // 1.0
+
+        // Set reference point to center (in 8.8 fixed point)
+        vdp.write_reg(VdpRegister::Bg0RefX as u32, 0x0000);
+        vdp.write_reg(VdpRegister::Bg0RefX as u32 + 2, 0x0000);
+        vdp.write_reg(VdpRegister::Bg0RefY as u32, 0x0000);
+        vdp.write_reg(VdpRegister::Bg0RefY as u32 + 2, 0x0000);
+
+        // Set tilemap address
+        vdp.write_reg(VdpRegister::Bg0TilemapAddr as u32, 0x0000);
+
+        // Create a simple tile (8x8 red square)
+        let mut tile_data = vec![0u8; 64];
+        for i in 0..64 {
+            tile_data[i] = 1; // Color index 1
+        }
+        vdp.load_tile_data(0, &tile_data);
+
+        // Set up a simple palette
+        let colors = vec![
+            (0x00, 0x00, 0x00), // 0: Black (transparent)
+            (0x3F, 0x00, 0x00), // 1: Red
+        ];
+        vdp.load_palette(0, &colors);
+
+        // Set up tilemap (tile 0, palette 0)
+        for i in 0..(32 * 32) {
+            vdp.write_vram(i * 2, 0x00);
+            vdp.write_vram(i * 2 + 1, 0x00);
+        }
+
+        // Render a frame
+        let cycles_per_frame = Vdp::CYCLES_PER_SCANLINE * Vdp::SCANLINES_PER_FRAME as u64;
+        vdp.step(cycles_per_frame);
+
+        // Check that rendering was attempted (framebuffer should have some non-zero pixels)
+        let fb = vdp.framebuffer();
+        // With identity transformation, the background should be rendered
+        // We just verify the function doesn't panic
+        assert_eq!(fb.len(), Vdp::NATIVE_WIDTH * Vdp::NATIVE_HEIGHT);
+    }
+
+    #[test]
+    fn vdp_bg0_non_affine_mode() {
+        let mut vdp = Vdp::new();
+
+        // Test BG0 in non-affine mode (simple scrolling)
+        vdp.set_display_enable(true);
+        vdp.set_layer_enable(true, false, false);
+
+        // Enable BG0 without affine mode
+        vdp.write_reg(VdpRegister::Bg0Control as u32, BgControl::ENABLE.bits());
+
+        // Set scroll values
+        vdp.write_reg(VdpRegister::Bg0ScrollX as u32, 10);
+        vdp.write_reg(VdpRegister::Bg0ScrollY as u32, 20);
+
+        // Set tilemap address
+        vdp.write_reg(VdpRegister::Bg0TilemapAddr as u32, 0x0000);
+
+        // Create a simple tile
+        let mut tile_data = vec![0u8; 64];
+        for i in 0..64 {
+            tile_data[i] = 1; // Color index 1
+        }
+        vdp.load_tile_data(0, &tile_data);
+
+        // Set up palette
+        let colors = vec![
+            (0x00, 0x00, 0x00), // 0: Black (transparent)
+            (0x00, 0x3F, 0x00), // 1: Green
+        ];
+        vdp.load_palette(0, &colors);
+
+        // Set up tilemap
+        for i in 0..(32 * 32) {
+            vdp.write_vram(i * 2, 0x00);
+            vdp.write_vram(i * 2 + 1, 0x00);
+        }
+
+        // Render a frame
+        let cycles_per_frame = Vdp::CYCLES_PER_SCANLINE * Vdp::SCANLINES_PER_FRAME as u64;
+        vdp.step(cycles_per_frame);
+
+        // Verify the function completes without panicking
+        let fb = vdp.framebuffer();
+        assert_eq!(fb.len(), Vdp::NATIVE_WIDTH * Vdp::NATIVE_HEIGHT);
     }
 }

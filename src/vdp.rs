@@ -354,7 +354,7 @@ impl Vdp {
             0x001C => self.bg0_affine[3] = value as i16,
             0x001E => {
                 // RefX low word
-                self.bg0_ref_x = (self.bg0_ref_x & 0xFFFF0000u32 as i32) | (value as i32);
+                self.bg0_ref_x = (self.bg0_ref_x & !0xFFFF) | (value as i32);
             }
             0x0020 => {
                 // RefX high byte (24-bit address)
@@ -517,21 +517,26 @@ impl Vdp {
             let pc = self.bg0_affine[2] as i32; // C (dy/dx)
             let pd = self.bg0_affine[3] as i32; // D (dy/dy)
             
-            // Reference points are in 8.8 fixed point format
+            // Reference points store the texture coordinate (in 8.8 fixed point)
+            // that should appear at the screen center
             let ref_x = self.bg0_ref_x;
             let ref_y = self.bg0_ref_y;
             
             let wraparound = self.bg0_control.contains(BgControl::WRAPAROUND);
             
-            // For each screen pixel, apply inverse affine transformation
+            // Screen center coordinates
+            let center_x = (width / 2) as i32;
+            let center_y = (height / 2) as i32;
+            
+            // For each screen pixel, apply affine transformation
             for screen_y in 0..height {
                 for screen_x in 0..width {
-                    // Calculate texture coordinates using affine transformation
-                    // The transformation is: [tex_x, tex_y] = [ref_x, ref_y] + Matrix * [screen_x, screen_y]
-                    let dx = screen_x as i32 - (width as i32 / 2);
-                    let dy = screen_y as i32 - (height as i32 / 2);
+                    // Calculate offset from screen center
+                    let dx = screen_x as i32 - center_x;
+                    let dy = screen_y as i32 - center_y;
                     
-                    // Apply transformation matrix (fixed point math: divide by 256 for 8.8 format)
+                    // Apply transformation matrix (8.8 fixed point math)
+                    // Formula: [tex_x, tex_y] = [ref_x, ref_y] + Matrix * [dx, dy]
                     let tex_x = ref_x + ((pa * dx + pb * dy) >> 8);
                     let tex_y = ref_y + ((pc * dx + pd * dy) >> 8);
                     

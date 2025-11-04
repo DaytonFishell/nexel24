@@ -5,3 +5,5 @@
 #
 # already existing elements were commented out
 /.idea
+.DS_Store
+.DS_Store

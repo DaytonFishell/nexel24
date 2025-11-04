@@ -6,7 +6,8 @@ This repository contains a Rust emulator implementation for the fictional Nexel-
 
 - **HXC-24 CPU**: 18.432MHz, 24-bit addressing, 16-bit data path
 - **Full Memory Map**: WorkRAM, ExpandedRAM, I/O, VRAM, CRAM, Cartridge ROM/Save, BIOS
-- **14+ CPU Instructions**: Load/Store, ALU operations, branching, subroutines
+- **18+ CPU Instructions**: Load/Store, ALU operations, branching, subroutines, interrupts
+- **Interrupt Handling**: Priority-based interrupt system with NMI support
 - **Cycle-Accurate Timing**: Proper cycle counting for all operations
 - **Frame-Based Execution**: Execute programs at 60 FPS with accurate timing
 
@@ -98,6 +99,7 @@ fn main() {
 | 0x32   | BNE rel  | Branch if not equal (zero clear) | 2-3 |
 | 0x40   | SEI      | Set interrupt disable | 1 |
 | 0x41   | CLI      | Clear interrupt disable | 1 |
+| 0x42   | RTI      | Return from interrupt | 5 |
 | 0xFF   | HLT      | Halt processor | 1 |
 
 ## Repository Structure
@@ -129,7 +131,7 @@ src/
 The project includes comprehensive tests:
 
 - **14 Bus tests**: Memory region access, addressing, read-only regions
-- **14 CPU tests**: Instruction execution, flags, cycle counting
+- **25 CPU tests**: Instruction execution, flags, cycle counting, interrupt handling
 - **7 Emulator tests**: Integration, frame timing, execution flow
 
 Run all tests with:
@@ -148,7 +150,7 @@ cargo test emulator # Emulator tests only
 
 ## Next Steps
 
-- [ ] Implement interrupt handling (NMI, IRQ, timers)
+- [x] Implement interrupt handling (NMI, IRQ, timers)
 - [ ] Add VDP-T register interface and basic rendering
 - [ ] Implement VLU-24 vector operations
 - [ ] Add APU-6 audio channel control

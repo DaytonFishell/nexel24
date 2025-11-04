@@ -315,4 +315,68 @@ mod tests {
         assert_eq!(Nexel24::CYCLES_PER_FRAME, 307_200);
         assert_eq!(Nexel24::CPU_CLOCK_HZ / Nexel24::TARGET_FPS, 307_200);
     }
+
+    #[test]
+    fn emulator_vdp_register_access() {
+        let mut emu = Nexel24::new();
+
+        // Write to VDP display control register via memory bus
+        emu.write_memory(0x100000, 0x07); // Enable display and all layers
+        emu.write_memory(0x100001, 0x00);
+
+        // Read back the value
+        let val_lo = emu.read_memory(0x100000);
+        let val_hi = emu.read_memory(0x100001);
+        let value = (val_lo as u16) | ((val_hi as u16) << 8);
+
+        assert_eq!(value, 0x07);
+        // Verify that the VDP received the write by checking it can read the register
+        assert_eq!(emu.vdp.read_reg(0), 0x07);
+    }
+
+    #[test]
+    fn emulator_vdp_vram_access() {
+        let mut emu = Nexel24::new();
+
+        // Write to VRAM through memory bus
+        emu.write_memory(0x200000, 0x42);
+        emu.write_memory(0x200001, 0x43);
+        emu.write_memory(0x200002, 0x44);
+
+        // Read back from VRAM
+        assert_eq!(emu.read_memory(0x200000), 0x42);
+        assert_eq!(emu.read_memory(0x200001), 0x43);
+        assert_eq!(emu.read_memory(0x200002), 0x44);
+    }
+
+    #[test]
+    fn emulator_vdp_cram_access() {
+        let mut emu = Nexel24::new();
+
+        // Write palette data to CRAM through memory bus
+        emu.write_memory(0x280000, 0x3F); // Red component
+        emu.write_memory(0x280001, 0x00); // Green component
+        emu.write_memory(0x280002, 0x00); // Blue component
+
+        // Read back from CRAM
+        assert_eq!(emu.read_memory(0x280000), 0x3F);
+        assert_eq!(emu.read_memory(0x280001), 0x00);
+        assert_eq!(emu.read_memory(0x280002), 0x00);
+    }
+
+    #[test]
+    fn emulator_vdp_timing_integration() {
+        let mut emu = Nexel24::new();
+
+        // Enable VDP display
+        emu.vdp.set_display_enable(true);
+
+        let initial_frame_count = emu.vdp.frame_count();
+
+        // Run for one frame
+        emu.step_frame();
+
+        // VDP should have advanced
+        assert!(emu.vdp.frame_count() > initial_frame_count || emu.cpu.halted);
+    }
 }

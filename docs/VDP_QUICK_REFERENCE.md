@@ -11,10 +11,15 @@
 | 0x0010 | BG0Control     | R/W | Background 0 control             |
 | 0x0012 | BG0ScrollX     | R/W | BG0 X scroll (-32768 to 32767)   |
 | 0x0014 | BG0ScrollY     | R/W | BG0 Y scroll                     |
-| 0x0016 | BG0AffineA     | R/W | Affine matrix A (sx)             |
-| 0x0018 | BG0AffineB     | R/W | Affine matrix B (shx)            |
-| 0x001A | BG0AffineC     | R/W | Affine matrix C (shy)            |
-| 0x001C | BG0AffineD     | R/W | Affine matrix D (sy)             |
+| 0x0016 | BG0AffineA     | R/W | Affine matrix A (pa, 8.8 fixed) |
+| 0x0018 | BG0AffineB     | R/W | Affine matrix B (pb, 8.8 fixed) |
+| 0x001A | BG0AffineC     | R/W | Affine matrix C (pc, 8.8 fixed) |
+| 0x001C | BG0AffineD     | R/W | Affine matrix D (pd, 8.8 fixed) |
+| 0x001E | BG0RefX        | R/W | Reference point X (24-bit)       |
+| 0x0020 | BG0RefX+2      | R/W | Reference point X high byte      |
+| 0x0022 | BG0RefY        | R/W | Reference point Y (24-bit)       |
+| 0x0024 | BG0RefY+2      | R/W | Reference point Y high byte      |
+| 0x0026 | BG0TilemapAddr | R/W | BG0 tilemap base address         |
 | 0x0030 | BG1Control     | R/W | Background 1 control             |
 | 0x0032 | BG1ScrollX     | R/W | BG1 X scroll                     |
 | 0x0034 | BG1ScrollY     | R/W | BG1 Y scroll                     |

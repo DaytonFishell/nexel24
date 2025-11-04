@@ -34,12 +34,24 @@ impl StatusFlags {
     /// Convert flags to u8 representation
     pub fn to_byte(&self) -> u8 {
         let mut byte = 0u8;
-        if self.carry { byte |= 0x01; }
-        if self.zero { byte |= 0x02; }
-        if self.interrupt_disable { byte |= 0x04; }
-        if self.decimal { byte |= 0x08; }
-        if self.overflow { byte |= 0x40; }
-        if self.negative { byte |= 0x80; }
+        if self.carry {
+            byte |= 0x01;
+        }
+        if self.zero {
+            byte |= 0x02;
+        }
+        if self.interrupt_disable {
+            byte |= 0x04;
+        }
+        if self.decimal {
+            byte |= 0x08;
+        }
+        if self.overflow {
+            byte |= 0x40;
+        }
+        if self.negative {
+            byte |= 0x80;
+        }
         byte
     }
 
@@ -86,20 +98,34 @@ pub struct Cpu {
 
     // Halted state
     pub halted: bool,
+
+    // Add pending interrupt queue and interrupt handling
+    pub pending_interrupts: Vec<u8>,
 }
 
 impl Cpu {
+    // Interrupt priority constants (higher value = higher priority)
+    const NMI_PRIORITY: u8 = 7;
+    const HBLANK_PRIORITY: u8 = 6;
+    const DMA_DONE_PRIORITY: u8 = 5;
+    const VLU_DONE_PRIORITY: u8 = 4;
+    const APU_BUF_EMPTY_PRIORITY: u8 = 3;
+    const TIMER0_PRIORITY: u8 = 2;
+    const PAD_EVENT_PRIORITY: u8 = 1;
+    const SWI_PRIORITY: u8 = 0;
+
     pub fn new() -> Self {
         Self {
             a: 0,
             x: 0,
             y: 0,
-            sp: 0xFFFF, // Stack grows down from top of WorkRAM
+            sp: 0xFFFF,   // Stack grows down from top of WorkRAM
             pc: 0xFF0000, // Start at BIOS
             sr: StatusFlags::new(),
             r: [0; 8],
             cycles: 0,
             halted: false,
+            pending_interrupts: Vec::new(),
         }
     }
 
@@ -112,10 +138,65 @@ impl Cpu {
         self.r = [0; 8];
         self.sr = StatusFlags::new();
         self.halted = false;
-        
+
         // Load reset vector from BIOS (0xFF0000)
         self.pc = bus.read_u24(0xFF0000);
         self.cycles = 0;
+    }
+
+    /// Request an interrupt (adds to pending list)
+    pub fn request_interrupt(&mut self, int: u8) {
+        // If interrupt is maskable and interrupts are disabled, ignore
+        if int != 7 && self.sr.interrupt_disable {
+            return;
+        }
+        // Simple deduplication: only add if not already pending
+        if !self.pending_interrupts.contains(&int) {
+            self.pending_interrupts.push(int);
+            // Keep list sorted by priority descending
+            self.pending_interrupts.sort_by_key(|&i| match i {
+                0 => Self::SWI_PRIORITY,
+                1 => Self::PAD_EVENT_PRIORITY,
+                2 => Self::TIMER0_PRIORITY,
+                3 => Self::APU_BUF_EMPTY_PRIORITY,
+                4 => Self::VLU_DONE_PRIORITY,
+                5 => Self::DMA_DONE_PRIORITY,
+                6 => Self::HBLANK_PRIORITY,
+                7 => Self::NMI_PRIORITY,
+                _ => 0,
+            });
+        }
+    }
+
+    /// Trigger a non‑maskable interrupt (NMI)
+    pub fn trigger_nmi(&mut self) {
+        // Ensure NMI is always handled first
+        if !self.pending_interrupts.contains(&7) {
+            self.pending_interrupts.insert(0, 7);
+        }
+    }
+
+    // Handle highest priority pending interrupt if interrupts are enabled
+    fn handle_interrupts(&mut self, bus: &mut Bus24) {
+        if self.sr.interrupt_disable {
+            return;
+        }
+        if let Some(&int) = self.pending_interrupts.first() {
+            // For now, just clear the interrupt and push PC onto stack
+            // Simple vector table: each interrupt has a 24-bit address at 0xFF0000 + int*3
+            let vector_addr = 0xFF0000 + (int as u32) * 3;
+            let handler_addr = bus.read_u24(vector_addr);
+            // Push PC onto stack (24-bit)
+            let sp = self.sp.wrapping_sub(3);
+            self.sp = sp;
+            bus.write_u24(sp as u32, self.pc);
+            // Set interrupt disable flag
+            self.sr.interrupt_disable = true;
+            // Jump to handler
+            self.pc = handler_addr;
+            // Remove handled interrupt
+            self.pending_interrupts.remove(0);
+        }
     }
 
     /// Execute a single instruction
@@ -124,6 +205,8 @@ impl Cpu {
             self.cycles += 1;
             return;
         }
+        // Handle any pending interrupts before fetching next opcode
+        self.handle_interrupts(bus);
 
         let opcode = bus.read_u8(self.pc);
         self.pc = self.pc.wrapping_add(1);
@@ -253,7 +336,7 @@ impl Cpu {
             0x21 => {
                 let addr = bus.read_u24(self.pc);
                 self.pc = self.pc.wrapping_add(3);
-                
+
                 // Push return address to stack (24-bit)
                 self.push_u24(bus, self.pc);
                 self.pc = addr;
@@ -268,9 +351,11 @@ impl Cpu {
 
             // BRA - Branch always (relative 8-bit signed)
             0x30 => {
+                // Read 8-bit signed offset from operand, advance past operand, then apply offset
                 let offset = bus.read_u8(self.pc) as i8 as i32;
+                // Advance PC past the operand byte first (consistent with BEQ/BNE)
                 self.pc = self.pc.wrapping_add(1);
-                self.pc = self.pc.wrapping_add_signed(offset);
+                self.pc = self.pc.wrapping_add(offset as u32);
                 self.cycles += 2;
             }
 
@@ -279,7 +364,7 @@ impl Cpu {
                 let offset = bus.read_u8(self.pc) as i8 as i32;
                 self.pc = self.pc.wrapping_add(1);
                 if self.sr.zero {
-                    self.pc = self.pc.wrapping_add_signed(offset);
+                    self.pc = self.pc.wrapping_add(offset as u32);
                     self.cycles += 3; // Branch taken adds cycle
                 } else {
                     self.cycles += 2;
@@ -291,7 +376,7 @@ impl Cpu {
                 let offset = bus.read_u8(self.pc) as i8 as i32;
                 self.pc = self.pc.wrapping_add(1);
                 if !self.sr.zero {
-                    self.pc = self.pc.wrapping_add_signed(offset);
+                    self.pc = self.pc.wrapping_add(offset as u32);
                     self.cycles += 3; // Branch taken adds cycle
                 } else {
                     self.cycles += 2;
@@ -310,7 +395,7 @@ impl Cpu {
                 self.cycles += 1;
             }
 
-            // HLT - Halt processor
+            // HLT - Halt CPU
             0xFF => {
                 self.halted = true;
                 self.cycles += 1;
@@ -371,13 +456,13 @@ mod tests {
     fn cpu_reset() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         // Set up a reset vector
         bus.load_bios(&[0x00, 0x04, 0x40]); // Reset vector: 0x400400
-        
+
         cpu.a = 0x1234;
         cpu.reset(&bus);
-        
+
         assert_eq!(cpu.a, 0);
         assert_eq!(cpu.pc, 0x400400);
     }
@@ -386,14 +471,14 @@ mod tests {
     fn cpu_lda_immediate() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         // Load test program in BIOS
         let program = vec![0x01, 0x34, 0x12]; // LDA #0x1234 (little-endian)
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.a, 0x1234);
         assert!(!cpu.sr.zero);
         assert!(!cpu.sr.negative);
@@ -404,16 +489,16 @@ mod tests {
     fn cpu_sta_absolute() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.a = 0x5678;
-        
+
         // STA $1000
         let program = vec![0x02, 0x00, 0x10, 0x00]; // STA $001000 (little-endian 24-bit)
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(bus.read_u16(0x001000), 0x5678);
         assert_eq!(cpu.cycles, 3);
     }
@@ -422,16 +507,16 @@ mod tests {
     fn cpu_add_immediate() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.a = 0x0100;
-        
+
         // ADD #0x0050
         let program = vec![0x10, 0x50, 0x00]; // ADD #0x0050
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.a, 0x0150);
         assert!(!cpu.sr.zero);
         assert!(!cpu.sr.carry);
@@ -442,16 +527,16 @@ mod tests {
     fn cpu_add_overflow() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.a = 0xFFFF;
-        
+
         // ADD #0x0001
         let program = vec![0x10, 0x01, 0x00]; // ADD #0x0001
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.a, 0x0000);
         assert!(cpu.sr.zero);
         assert!(cpu.sr.carry);
@@ -461,16 +546,16 @@ mod tests {
     fn cpu_sub_immediate() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.a = 0x0100;
-        
+
         // SUB #0x0050
         let program = vec![0x11, 0x50, 0x00]; // SUB #0x0050
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.a, 0x00B0);
         assert!(!cpu.sr.zero);
         assert!(cpu.sr.carry); // No borrow
@@ -480,16 +565,16 @@ mod tests {
     fn cpu_and_immediate() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.a = 0xF0F0;
-        
+
         // AND #0xFF00
         let program = vec![0x12, 0x00, 0xFF]; // AND #0xFF00
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.a, 0xF000);
         assert!(!cpu.sr.zero);
         assert!(cpu.sr.negative); // Bit 15 is set
@@ -499,14 +584,14 @@ mod tests {
     fn cpu_jmp_absolute() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         // JMP $123456
         let program = vec![0x20, 0x56, 0x34, 0x12]; // JMP $123456
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.pc, 0x123456);
         assert_eq!(cpu.cycles, 3);
     }
@@ -515,24 +600,24 @@ mod tests {
     fn cpu_jsr_rts() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         let return_addr = 0xFF0004;
-        
+
         // JSR $200000, then RTS at 0x200000
         let program = vec![0x21, 0x00, 0x00, 0x20]; // JSR $200000
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         let old_sp = cpu.sp;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.pc, 0x200000);
         assert_eq!(cpu.sp, old_sp.wrapping_sub(3)); // Stack grew by 3 bytes
-        
+
         // RTS - write it to VRAM area where we can write
         bus.write_u8(0x200000, 0x22); // RTS opcode
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.pc, return_addr);
         assert_eq!(cpu.sp, old_sp); // Stack restored
     }
@@ -541,16 +626,16 @@ mod tests {
     fn cpu_beq_taken() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.sr.zero = true;
-        
+
         // BEQ +10
         let program = vec![0x31, 10]; // BEQ +10
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.pc, 0xFF0000 + 2 + 10);
         assert_eq!(cpu.cycles, 3); // Branch taken
     }
@@ -559,16 +644,16 @@ mod tests {
     fn cpu_beq_not_taken() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         cpu.sr.zero = false;
-        
+
         // BEQ +10
         let program = vec![0x31, 10]; // BEQ +10
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         cpu.step(&mut bus);
-        
+
         assert_eq!(cpu.pc, 0xFF0002);
         assert_eq!(cpu.cycles, 2); // Branch not taken
     }
@@ -577,17 +662,17 @@ mod tests {
     fn cpu_halt() {
         let mut cpu = Cpu::new();
         let mut bus = Bus24::new();
-        
+
         // HLT
         let program = vec![0xFF]; // HLT opcode
         bus.load_bios(&program);
-        
+
         cpu.pc = 0xFF0000;
         assert!(!cpu.halted);
-        
+
         cpu.step(&mut bus);
         assert!(cpu.halted);
-        
+
         // Further steps should do nothing but increment cycles
         let cycles_before = cpu.cycles;
         cpu.step(&mut bus);
@@ -600,10 +685,10 @@ mod tests {
         flags.carry = true;
         flags.zero = true;
         flags.negative = true;
-        
+
         let byte = flags.to_byte();
         let restored = StatusFlags::from_byte(byte);
-        
+
         assert_eq!(flags, restored);
     }
 }

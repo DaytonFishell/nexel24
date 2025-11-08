@@ -192,7 +192,7 @@ impl Cpu {
             if int != 7 && self.sr.interrupt_disable {
                 return false;
             }
-            
+
             // Simple vector table: each interrupt has a 24-bit address at 0xFF0000 + int*3
             let vector_addr = 0xFF0000 + (int as u32) * 3;
             let handler_addr = bus.read_u24(vector_addr);
@@ -749,7 +749,7 @@ mod tests {
 
         // Check that old PC was pushed to stack (SP decreased by 3)
         assert_eq!(cpu.sp, old_sp.wrapping_sub(3));
-        
+
         // Verify the pushed value by popping it back
         let mut test_cpu = Cpu::new();
         test_cpu.sp = cpu.sp;
@@ -992,7 +992,7 @@ mod tests {
 
         // PC should have jumped to NMI handler
         assert_eq!(cpu.pc, 0x200000);
-        
+
         // Verify that PC was pushed to stack
         let mut test_cpu = Cpu::new();
         test_cpu.sp = cpu.sp;

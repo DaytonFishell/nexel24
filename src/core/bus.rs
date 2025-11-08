@@ -19,7 +19,9 @@ pub struct Bus24 {
     cart_rom: Vec<u8>,     // 0x400000..0x9FFFFF (6MB)
     cart_save: Vec<u8>,    // 0xA00000..0xA3FFFF (256KB)
     bios: Vec<u8>,         // 0xFF0000..0xFFFFFF (64KB)
-
+    // Added internal storage for VRAM/CRAM when VDP routing disabled
+    vram: Vec<u8>, // 0x200000..0x27FFFF (512KB)
+    cram: Vec<u8>, // 0x280000..0x28FFFF (64KB)
     // VDP is handled separately via routing since it has its own VRAM/CRAM
     vdp_routing: bool, // When true, route VDP regions to external VDP
 }
@@ -32,6 +34,8 @@ impl Bus24 {
     pub const CART_ROM_SIZE: usize = 0x600000; // 6MB
     pub const CART_SAVE_SIZE: usize = 0x040000; // 256KB
     pub const BIOS_SIZE: usize = 0x010000; // 64KB
+    pub const VRAM_SIZE: usize = 0x80000; // 512KB
+    pub const CRAM_SIZE: usize = 0x10000; // 64KB
 
     // Memory region base addresses
     pub const WORKRAM_BASE: u32 = 0x000000;
@@ -54,6 +58,8 @@ impl Bus24 {
             cart_rom: vec![0; Self::CART_ROM_SIZE],
             cart_save: vec![0; Self::CART_SAVE_SIZE],
             bios: vec![0; Self::BIOS_SIZE],
+            vram: vec![0; Self::VRAM_SIZE],
+            cram: vec![0; Self::CRAM_SIZE],
             vdp_routing: false,
         }
     }
@@ -107,19 +113,21 @@ impl Bus24 {
                 self.io.get(offset).copied().unwrap_or(0xFF)
             }
             // VRAM: 0x200000..0x27FFFF (should be routed to VDP externally)
-            a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + 0x80000 => {
+            a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + Self::VRAM_SIZE as u32 => {
                 if self.vdp_routing {
                     0xFF // Caller should route to VDP
                 } else {
-                    0xFF // No internal VRAM
+                    let offset = (a - Self::VRAM_BASE) as usize;
+                    self.vram[offset]
                 }
             }
             // CRAM: 0x280000..0x28FFFF (should be routed to VDP externally)
-            a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + 0x10000 => {
+            a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + Self::CRAM_SIZE as u32 => {
                 if self.vdp_routing {
                     0xFF // Caller should route to VDP
                 } else {
-                    0xFF // No internal CRAM
+                    let offset = (a - Self::CRAM_BASE) as usize;
+                    self.cram[offset]
                 }
             }
             // CartROM: 0x400000..0x9FFFFF
@@ -187,12 +195,22 @@ impl Bus24 {
                 }
             }
             // VRAM: 0x200000..0x27FFFF (should be routed to VDP externally)
-            a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + 0x80000 => {
-                // Caller should route to VDP, ignore here
+            a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + Self::VRAM_SIZE as u32 => {
+                if !self.vdp_routing {
+                    let offset = (a - Self::VRAM_BASE) as usize;
+                    if let Some(cell) = self.vram.get_mut(offset) {
+                        *cell = value;
+                    }
+                }
             }
             // CRAM: 0x280000..0x28FFFF (should be routed to VDP externally)
-            a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + 0x10000 => {
-                // Caller should route to VDP, ignore here
+            a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + Self::CRAM_SIZE as u32 => {
+                if !self.vdp_routing {
+                    let offset = (a - Self::CRAM_BASE) as usize;
+                    if let Some(cell) = self.cram.get_mut(offset) {
+                        *cell = value;
+                    }
+                }
             }
             // CartROM: 0x400000..0x9FFFFF (read-only, writes ignored)
             a if a >= Self::CART_ROM_BASE

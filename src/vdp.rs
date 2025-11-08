@@ -25,12 +25,12 @@ pub enum VdpRegister {
     Bg0Control = 0x0010,
     Bg0ScrollX = 0x0012,
     Bg0ScrollY = 0x0014,
-    Bg0AffineA = 0x0016, // sx (scale x)
-    Bg0AffineB = 0x0018, // shx (shear x)
-    Bg0AffineC = 0x001A, // shy (shear y)
-    Bg0AffineD = 0x001C, // sy (scale y)
-    Bg0RefX = 0x001E,    // reference point x (24-bit)
-    Bg0RefY = 0x0022,    // reference point y (24-bit)
+    Bg0AffineA = 0x0016,     // sx (scale x)
+    Bg0AffineB = 0x0018,     // shx (shear x)
+    Bg0AffineC = 0x001A,     // shy (shear y)
+    Bg0AffineD = 0x001C,     // sy (scale y)
+    Bg0RefX = 0x001E,        // reference point x (24-bit)
+    Bg0RefY = 0x0022,        // reference point y (24-bit)
     Bg0TilemapAddr = 0x0026, // tilemap address
 
     Bg1Control = 0x0030,
@@ -189,9 +189,9 @@ pub struct Vdp {
     bg0_control: BgControl,
     bg0_scroll_x: i16,
     bg0_scroll_y: i16,
-    bg0_affine: [i16; 4], // A, B, C, D matrix parameters
-    bg0_ref_x: i32,       // Reference point X (24-bit fixed point)
-    bg0_ref_y: i32,       // Reference point Y (24-bit fixed point)
+    bg0_affine: [i16; 4],  // A, B, C, D matrix parameters
+    bg0_ref_x: i32,        // Reference point X (24-bit fixed point)
+    bg0_ref_y: i32,        // Reference point Y (24-bit fixed point)
     bg0_tilemap_addr: u32, // Tilemap base address in VRAM
 
     bg1_control: BgControl,
@@ -498,7 +498,7 @@ impl Vdp {
         }
 
         let (width, height) = self.display_dimensions();
-        
+
         // Determine tilemap size based on control flags
         let tile_map_size = if self.bg0_control.contains(BgControl::SIZE_128x128) {
             128
@@ -516,34 +516,34 @@ impl Vdp {
             let pb = self.bg0_affine[1] as i32; // B (dx/dy)
             let pc = self.bg0_affine[2] as i32; // C (dy/dx)
             let pd = self.bg0_affine[3] as i32; // D (dy/dy)
-            
+
             // Reference points store the texture coordinate (in 8.8 fixed point)
             // that should appear at the screen center
             let ref_x = self.bg0_ref_x;
             let ref_y = self.bg0_ref_y;
-            
+
             let wraparound = self.bg0_control.contains(BgControl::WRAPAROUND);
-            
+
             // Screen center coordinates
             let center_x = (width / 2) as i32;
             let center_y = (height / 2) as i32;
-            
+
             // For each screen pixel, apply affine transformation
             for screen_y in 0..height {
                 for screen_x in 0..width {
                     // Calculate offset from screen center
                     let dx = screen_x as i32 - center_x;
                     let dy = screen_y as i32 - center_y;
-                    
+
                     // Apply transformation matrix (8.8 fixed point math)
                     // Formula: [tex_x, tex_y] = [ref_x, ref_y] + Matrix * [dx, dy]
                     let tex_x = ref_x + ((pa * dx + pb * dy) >> 8);
                     let tex_y = ref_y + ((pc * dx + pd * dy) >> 8);
-                    
+
                     // Convert from 8.8 fixed point to integer pixel coordinates
                     let mut pixel_x = (tex_x >> 8) as i32;
                     let mut pixel_y = (tex_y >> 8) as i32;
-                    
+
                     // Handle wraparound or clipping
                     if wraparound {
                         let map_size = (tile_map_size * 8) as i32;
@@ -551,46 +551,48 @@ impl Vdp {
                         pixel_y = pixel_y.rem_euclid(map_size);
                     } else {
                         // Clip to tilemap bounds
-                        if pixel_x < 0 || pixel_x >= (tile_map_size * 8) as i32
-                            || pixel_y < 0 || pixel_y >= (tile_map_size * 8) as i32
+                        if pixel_x < 0
+                            || pixel_x >= (tile_map_size * 8) as i32
+                            || pixel_y < 0
+                            || pixel_y >= (tile_map_size * 8) as i32
                         {
                             continue; // Out of bounds, skip pixel
                         }
                     }
-                    
+
                     // Calculate tile coordinates
                     let tile_x = (pixel_x / 8) as u16;
                     let tile_y = (pixel_y / 8) as u16;
                     let px = (pixel_x % 8) as u16;
                     let py = (pixel_y % 8) as u16;
-                    
+
                     // Read tile index from tilemap
                     let tile_map_offset = ((tile_y * tile_map_size as u16 + tile_x) * 2) as u32;
                     let tilemap_offset = self.bg0_tilemap_addr + tile_map_offset;
                     let tile_entry = self.read_vram(tilemap_offset) as u16
                         | ((self.read_vram(tilemap_offset + 1) as u16) << 8);
-                    
+
                     let tile_index = tile_entry & 0x3FF; // 10-bit tile index
                     let palette = ((tile_entry >> 12) & 0xF) as u8;
-                    
+
                     // Note: In affine mode, flip flags are typically ignored
                     // Read pixel from tile data (8x8 tiles, 8 bits per pixel)
                     let tile_data_offset = (tile_index as u32 * 64) + (py as u32 * 8) + px as u32;
                     let color_index = self.read_vram(tile_data_offset);
-                    
+
                     // Skip transparent pixels (color 0)
                     if color_index == 0 {
                         continue;
                     }
-                    
+
                     // Read color from palette
                     let palette_offset = (palette as u32 * 256 * 3) + (color_index as u32 * 3);
                     let r = self.read_cram(palette_offset);
                     let g = self.read_cram(palette_offset + 1);
                     let b = self.read_cram(palette_offset + 2);
-                    
+
                     let color = self.rgb666_to_rgb888(r, g, b);
-                    
+
                     // Write to framebuffer
                     let fb_offset = screen_y * width + screen_x;
                     if let Some(pixel) = self.framebuffer.get_mut(fb_offset) {
@@ -602,51 +604,51 @@ impl Vdp {
             // Non-affine mode: simple scrolling like BG1
             let scroll_x = self.bg0_scroll_x;
             let scroll_y = self.bg0_scroll_y;
-            
+
             for screen_y in 0..height {
                 for screen_x in 0..width {
                     // Apply scrolling
                     let world_x = (screen_x as i16).wrapping_add(scroll_x) as u16;
                     let world_y = (screen_y as i16).wrapping_add(scroll_y) as u16;
-                    
+
                     // Calculate tile coordinates
                     let tile_x = (world_x / 8) % tile_map_size as u16;
                     let tile_y = (world_y / 8) % tile_map_size as u16;
                     let pixel_x = world_x % 8;
                     let pixel_y = world_y % 8;
-                    
+
                     // Read tile index from tilemap
                     let tile_map_offset = ((tile_y * tile_map_size as u16 + tile_x) * 2) as u32;
                     let tilemap_offset = self.bg0_tilemap_addr + tile_map_offset;
                     let tile_entry = self.read_vram(tilemap_offset) as u16
                         | ((self.read_vram(tilemap_offset + 1) as u16) << 8);
-                    
+
                     let tile_index = tile_entry & 0x3FF; // 10-bit tile index
                     let palette = ((tile_entry >> 12) & 0xF) as u8;
                     let flip_h = (tile_entry & 0x0400) != 0;
                     let flip_v = (tile_entry & 0x0800) != 0;
-                    
+
                     // Apply flipping
                     let px = if flip_h { 7 - pixel_x } else { pixel_x };
                     let py = if flip_v { 7 - pixel_y } else { pixel_y };
-                    
+
                     // Read pixel from tile data (8x8 tiles, 8 bits per pixel)
                     let tile_data_offset = (tile_index as u32 * 64) + (py as u32 * 8) + px as u32;
                     let color_index = self.read_vram(tile_data_offset);
-                    
+
                     // Skip transparent pixels (color 0)
                     if color_index == 0 {
                         continue;
                     }
-                    
+
                     // Read color from palette
                     let palette_offset = (palette as u32 * 256 * 3) + (color_index as u32 * 3);
                     let r = self.read_cram(palette_offset);
                     let g = self.read_cram(palette_offset + 1);
                     let b = self.read_cram(palette_offset + 2);
-                    
+
                     let color = self.rgb666_to_rgb888(r, g, b);
-                    
+
                     // Write to framebuffer
                     let fb_offset = screen_y * width + screen_x;
                     if let Some(pixel) = self.framebuffer.get_mut(fb_offset) {

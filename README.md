@@ -186,6 +186,34 @@ vdp.set_sprite(0, sprite);
 vdp.step(Vdp::CYCLES_PER_SCANLINE * Vdp::SCANLINES_PER_FRAME as u64);
 ```
 
+### Example: Using the VLU-24
+
+```rust
+use nexel_core::cpu::Cpu;
+use nexel_core::vlu::{Vlu, VluJob, VluResult};
+
+let mut cpu = Cpu::new();
+let mut vlu = Vlu::new();
+
+// Load vector and matrix registers
+vlu.set_vector(0, [1.0, 0.0, 0.0])?;
+vlu.set_matrix(0, [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])?;
+
+// Rotate vector around Z by 90 degrees
+match vlu.compute(
+    &mut cpu,
+    VluJob::Transform {
+        dest: 1,
+        vec: 0,
+        matrix: 0,
+    },
+) {
+    Ok(VluResult::Vector(rotated)) => assert_eq!(rotated, [0.0, 1.0, 0.0]),
+    Ok(_) => unreachable!(),
+    Err(err) => panic!("VLU error: {err}"),
+}
+```
+
 ## Repository Structure
 
 ```
@@ -195,7 +223,7 @@ src/
 │   └── bus.rs          - 24-bit memory bus implementation
 ├── cpu.rs              - HXC-24 CPU implementation
 ├── vdp.rs              - VDP-T GPU implementation
-├── vlu.rs              - VLU-24 vector coprocessor (stub)
+├── vlu.rs              - VLU-24 vector coprocessor
 ├── apu.rs              - APU-6 audio processor (stub)
 ├── vm.rs               - Baseplate VM (stub)
 ├── bytecode.rs         - Baseplate bytecode module loader (stub)
@@ -243,7 +271,7 @@ cargo test vdp      # VDP tests only
 - [x] Implement interrupt handling (NMI, IRQ, timers)
 - [x] Add VDP-T register interface and basic rendering
 - [x] Complete VDP-T affine transformation for BG0 layer
-- [ ] Implement VLU-24 vector operations
+- [x] Implement VLU-24 vector operations
 - [ ] Add APU-6 audio channel control
 - [ ] Baseplate VM bytecode interpreter
 - [ ] Add continuous integration workflow
@@ -252,7 +280,7 @@ cargo test vdp      # VDP tests only
 
 ## Specifications
 
-See `nexel24_spec.json` and `baseplate_bytecode_schema.yaml` for detailed hardware specifications and file formats.
+See `nexel24_spec.json`, `baseplate_bytecode_schema.yaml`, and `docs/VLU_REFERENCE.md` for detailed hardware specifications and subsystem references.
 
 ## License
 

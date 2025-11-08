@@ -242,7 +242,7 @@ cargo test vdp      # VDP tests only
 
 - [x] Implement interrupt handling (NMI, IRQ, timers)
 - [x] Add VDP-T register interface and basic rendering
-- [ ] Complete VDP-T affine transformation for BG0 layer
+- [x] Complete VDP-T affine transformation for BG0 layer
 - [ ] Implement VLU-24 vector operations
 - [ ] Add APU-6 audio channel control
 - [ ] Baseplate VM bytecode interpreter

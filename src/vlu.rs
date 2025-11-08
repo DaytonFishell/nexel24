@@ -1,21 +1,21 @@
 //! VLU-24 vector coprocessor implementation.
 //!
-//! The VLU exposes eight vector registers and four matrix registers.  All
+//! The VLU exposes sixteen vector registers and four matrix registers.  All
 //! operations are 3D and operate on 32-bit floating point data which mirrors the
 //! behaviour of the original hardware's 24-bit fixed point units.  The
 //! implementation favours determinism and correctness over raw throughput.
 //!
 //! Each invocation of [`Vlu::compute`] performs a single vector job and then
 //! raises the `VLU_DONE` interrupt (interrupt id 4).  Callers can load registers
-//! via [`set_vector`] and [`set_matrix`] prior to scheduling jobs, and then
-//! inspect the results using [`vector`], [`scalar_result`] or the returned
+//! via [`Self::set_vector`] and [`Self::set_matrix`] prior to scheduling jobs, and then
+//! inspect the results using [`Self::vector`], [`Self::scalar_result`] or the returned
 //! [`VluResult`].
 
 use std::fmt;
 
 use thiserror::Error;
 
-const VECTOR_REGISTER_COUNT: usize = 8;
+const VECTOR_REGISTER_COUNT: usize = 16;
 const MATRIX_REGISTER_COUNT: usize = 4;
 
 /// An individual 3D vector used by the VLU.
@@ -118,7 +118,7 @@ pub enum VluJob {
         a: usize,
         b: usize,
     },
-    /// Normalise vector `src` and write it into `dest`.
+    /// Normalize vector `src` and write it into `dest`.
     Normalize { dest: usize, src: usize },
 }
 
@@ -228,6 +228,7 @@ impl Vlu {
                     .vectors
                     .get_mut(dest)
                     .ok_or(VluError::InvalidVectorRegister(dest))? = transformed;
+                cpu.cycles += 12; // Matrix transform takes 12 cycles
                 VluResult::Vector(transformed.to_array())
             }
             VluJob::Dot { a, b } => {
@@ -241,6 +242,7 @@ impl Vlu {
                     .ok_or(VluError::InvalidVectorRegister(b))?;
                 let dot = lhs.dot(rhs);
                 self.last_scalar = dot;
+                cpu.cycles += 3; // Dot product takes 3 cycles
                 VluResult::Scalar(dot)
             }
             VluJob::Cross { dest, a, b } => {
@@ -257,6 +259,7 @@ impl Vlu {
                     .vectors
                     .get_mut(dest)
                     .ok_or(VluError::InvalidVectorRegister(dest))? = cross;
+                cpu.cycles += 6; // Cross product takes 6 cycles
                 VluResult::Vector(cross.to_array())
             }
             VluJob::Normalize { dest, src } => {
@@ -269,6 +272,7 @@ impl Vlu {
                     .vectors
                     .get_mut(dest)
                     .ok_or(VluError::InvalidVectorRegister(dest))? = normalized;
+                cpu.cycles += 8; // Normalize takes 8 cycles
                 VluResult::Vector(normalized.to_array())
             }
         };
@@ -385,13 +389,13 @@ mod tests {
             .compute(
                 &mut cpu,
                 VluJob::Transform {
-                    dest: 8,
+                    dest: 16,
                     vec: 0,
                     matrix: 0,
                 },
             )
             .unwrap_err();
 
-        assert_eq!(err, VluError::InvalidVectorRegister(8));
+        assert_eq!(err, VluError::InvalidVectorRegister(16));
     }
 }

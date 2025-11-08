@@ -1,6 +1,6 @@
 # VLU-24 Vector Coprocessor
 
-The VLU-24 provides eight 3D vector registers and four 3×3 matrix registers
+The VLU-24 provides sixteen 3D vector registers and four 3×3 matrix registers
 that can be combined to accelerate linear algebra workloads such as rotation,
 lighting and physics calculations.
 
@@ -8,7 +8,7 @@ lighting and physics calculations.
 
 | Register | Description |
 |----------|-------------|
-| V0-V7    | 3-component vector registers stored as 32-bit floating point values |
+| V0-V15   | 3-component vector registers stored as 32-bit floating point values |
 | M0-M3    | 3×3 matrix registers stored in row-major order |
 | SCALAR   | Last scalar result (updated by dot products) |
 
@@ -60,8 +60,8 @@ vlu.compute(
 
 ### Normalize
 
-Normalises the provided vector and writes the unit vector into the destination
-register. Zero-length vectors normalise to `[0.0, 0.0, 0.0]`.
+Normalizes the provided vector and writes the unit vector into the destination
+register. Zero-length vectors normalize to `[0.0, 0.0, 0.0]`.
 
 ```rust
 vlu.compute(
@@ -72,7 +72,7 @@ vlu.compute(
 
 ## Fast Math Feature
 
-Enabling the `fast-math` Cargo feature switches the normalisation routine to use
+Enabling the `fast-math` Cargo feature switches the normalization routine to use
 an approximate inverse square root (Quake III style). This trades a small amount
 of precision for higher throughput and mirrors the optional fast path available
 on the original hardware.

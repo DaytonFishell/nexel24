@@ -42,9 +42,9 @@ impl BaseplateVm {
                 }
                 2 => {
                     // JMP imm24
-                    let addr = ((bytes[self.pc + 2] as usize) << 16)
-                        | ((bytes[self.pc + 1] as usize) << 8)
-                        | (bytes[self.pc] as usize); // but we need correct order; will adjust
+                    let addr = ((bytes[self.pc + 1] as usize) << 16)
+                        | ((bytes[self.pc + 2] as usize) << 8)
+                        | (bytes[self.pc + 3] as usize);
                     self.pc = addr;
                 }
                 16 => {
@@ -52,7 +52,7 @@ impl BaseplateVm {
                     let kidx = ((bytes[self.pc + 2] as u16) << 8) | (bytes[self.pc + 1] as u16);
                     // TODO: lookup constant pool (not yet implemented)
                     self.stack.push(Value::Nil);
-                    self.pc += 6; // opcode + 2 operands + 1 padding? simplified
+                    self.pc += 3;
                 }
                 17 => {
                     // LDI imm24
@@ -60,7 +60,7 @@ impl BaseplateVm {
                         | ((bytes[self.pc + 1] as u32) << 8)
                         | (bytes[self.pc] as u32);
                     self.stack.push(Value::Int24(imm as i32));
-                    self.pc += 6;
+                    self.pc += 3;
                 }
                 32 => {
                     // ADD

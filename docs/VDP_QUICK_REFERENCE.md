@@ -163,7 +163,7 @@ vdp.load_tile_data(0, & tile);
 // Format: [flip_v][flip_h][palette:4][tile_index:10]
 let tile_entry = 0x0000u16; // Tile 0, palette 0, no flip
 vdp.write_vram(tilemap_addr, (tile_entry & 0xFF) as u8);
-vdp.write_vram(tilemap_addr + 1, (tile_entry > > 8) as u8);
+vdp.write_vram(tilemap_addr + 1, (tile_entry >> 8) as u8);
 ```
 
 ## Color Format

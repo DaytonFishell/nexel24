@@ -1,0 +1,29 @@
+[tasks.build]
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.clean]
+command = "cargo"
+args = ["clean"]
+
+[tasks.test]
+command = "cargo"
+args = ["test"]
+
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.lint]
+command = "cargo"
+args = ["clippy", "--", "-D", "warnings"]
+
+[tasks.asm]
+command = "cargo"
+args = ["asm", "--lib"]
+
+[tasks.default]
+run_task = [
+    { name = "build" },
+    { name = "asm", fork = true }
+]

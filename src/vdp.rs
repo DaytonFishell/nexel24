@@ -362,7 +362,7 @@ impl Vdp {
             }
             0x0022 => {
                 // RefY low word
-                self.bg0_ref_y = (self.bg0_ref_y & 0xFFFF0000u32 as i32) | (value as i32);
+                self.bg0_ref_y = (self.bg0_ref_y & !0xFFFF) | (value as i32);
             }
             0x0024 => {
                 // RefY high byte (24-bit address)

@@ -47,7 +47,7 @@ impl BytecodeModule {
         let mut file = File::open(path)?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
-        if buf.len() < 22 {
+        if buf.len() < 23 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "File too short for BPX header",
@@ -66,7 +66,7 @@ impl BytecodeModule {
         let code_offset = Self::read_u24_le(&buf, 11);
         let meta_offset = Self::read_u24_le(&buf, 14);
         let entry_point = u16::from_le_bytes([buf[17], buf[18]]);
-        let crc32 = u32::from_le_bytes([buf[19], buf[20], buf[21], 0]);
+        let crc32 = u32::from_le_bytes([buf[19], buf[20], buf[21], buf[22]]);
         let header = Header {
             magic: [buf[0], buf[1], buf[2], buf[3]],
             version,

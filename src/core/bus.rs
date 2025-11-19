@@ -1,40 +1,49 @@
 /// 24-bit address bus with full memory map support
-/// 
+///
 /// Memory Map (per Nexel-24 specification):
 /// - 0x000000..0x00FFFF: WorkRAM (64KB) - Primary stack/heap
 /// - 0x010000..0x03FFFF: ExpandedRAM (192KB)
 /// - 0x100000..0x10FFFF: I/O (64KB) - Memory-mapped coprocessors
-/// - 0x200000..0x27FFFF: VRAM (512KB)
-/// - 0x280000..0x28FFFF: CRAM (64KB)
+///   - 0x100000..0x103FFF: VDP-T registers
+///   - 0x108000..0x10BFFF: VLU-24 coprocessor
+///   - 0x10C000..0x10FFFF: APU-6 coprocessor
+/// - 0x200000..0x27FFFF: VRAM (512KB) - VDP-T video memory
+/// - 0x280000..0x28FFFF: CRAM (64KB) - VDP-T palette memory
 /// - 0x400000..0x9FFFFF: CartROM (6MB max)
 /// - 0xA00000..0xA3FFFF: CartSave (256KB)
 /// - 0xFF0000..0xFFFFFF: BIOS (64KB)
 pub struct Bus24 {
-    workram: Vec<u8>,       // 0x000000..0x00FFFF (64KB)
-    expanded_ram: Vec<u8>,  // 0x010000..0x03FFFF (192KB)
-    io: Vec<u8>,            // 0x100000..0x10FFFF (64KB) - I/O registers
-    vram: Vec<u8>,          // 0x200000..0x27FFFF (512KB)
-    cram: Vec<u8>,          // 0x280000..0x28FFFF (64KB)
-    cart_rom: Vec<u8>,      // 0x400000..0x9FFFFF (6MB)
-    cart_save: Vec<u8>,     // 0xA00000..0xA3FFFF (256KB)
-    bios: Vec<u8>,          // 0xFF0000..0xFFFFFF (64KB)
+    workram: Vec<u8>,      // 0x000000..0x00FFFF (64KB)
+    expanded_ram: Vec<u8>, // 0x010000..0x03FFFF (192KB)
+    io: Vec<u8>,           // 0x100000..0x10FFFF (64KB) - Generic I/O registers
+    cart_rom: Vec<u8>,     // 0x400000..0x9FFFFF (6MB)
+    cart_save: Vec<u8>,    // 0xA00000..0xA3FFFF (256KB)
+    bios: Vec<u8>,         // 0xFF0000..0xFFFFFF (64KB)
+    // Added internal storage for VRAM/CRAM when VDP routing disabled
+    vram: Vec<u8>, // 0x200000..0x27FFFF (512KB)
+    cram: Vec<u8>, // 0x280000..0x28FFFF (64KB)
+    // VDP is handled separately via routing since it has its own VRAM/CRAM
+    vdp_routing: bool, // When true, route VDP regions to external VDP
 }
 
 impl Bus24 {
     // Memory region sizes
-    pub const WORKRAM_SIZE: usize = 0x010000;      // 64KB
+    pub const WORKRAM_SIZE: usize = 0x010000; // 64KB
     pub const EXPANDED_RAM_SIZE: usize = 0x030000; // 192KB
-    pub const IO_SIZE: usize = 0x010000;           // 64KB
-    pub const VRAM_SIZE: usize = 0x080000;         // 512KB
-    pub const CRAM_SIZE: usize = 0x010000;         // 64KB
-    pub const CART_ROM_SIZE: usize = 0x600000;     // 6MB
-    pub const CART_SAVE_SIZE: usize = 0x040000;    // 256KB
-    pub const BIOS_SIZE: usize = 0x010000;         // 64KB
+    pub const IO_SIZE: usize = 0x010000; // 64KB
+    pub const CART_ROM_SIZE: usize = 0x600000; // 6MB
+    pub const CART_SAVE_SIZE: usize = 0x040000; // 256KB
+    pub const BIOS_SIZE: usize = 0x010000; // 64KB
+    pub const VRAM_SIZE: usize = 0x80000; // 512KB
+    pub const CRAM_SIZE: usize = 0x10000; // 64KB
 
     // Memory region base addresses
     pub const WORKRAM_BASE: u32 = 0x000000;
     pub const EXPANDED_RAM_BASE: u32 = 0x010000;
     pub const IO_BASE: u32 = 0x100000;
+    pub const VDP_IO_BASE: u32 = 0x100000; // VDP-T registers within I/O
+    pub const VLU_IO_BASE: u32 = 0x108000; // VLU-24 within I/O
+    pub const APU_IO_BASE: u32 = 0x10C000; // APU-6 within I/O
     pub const VRAM_BASE: u32 = 0x200000;
     pub const CRAM_BASE: u32 = 0x280000;
     pub const CART_ROM_BASE: u32 = 0x400000;
@@ -46,12 +55,18 @@ impl Bus24 {
             workram: vec![0; Self::WORKRAM_SIZE],
             expanded_ram: vec![0; Self::EXPANDED_RAM_SIZE],
             io: vec![0; Self::IO_SIZE],
-            vram: vec![0; Self::VRAM_SIZE],
-            cram: vec![0; Self::CRAM_SIZE],
             cart_rom: vec![0; Self::CART_ROM_SIZE],
             cart_save: vec![0; Self::CART_SAVE_SIZE],
             bios: vec![0; Self::BIOS_SIZE],
+            vram: vec![0; Self::VRAM_SIZE],
+            cram: vec![0; Self::CRAM_SIZE],
+            vdp_routing: false,
         }
+    }
+
+    /// Enable VDP routing for external VDP coprocessor
+    pub fn enable_vdp_routing(&mut self) {
+        self.vdp_routing = true;
     }
 
     /// Load cartridge ROM data
@@ -67,43 +82,67 @@ impl Bus24 {
     }
 
     /// Read a byte from the 24-bit address space
+    ///
+    /// Note: VDP regions (I/O 0x100000-0x103FFF, VRAM 0x200000-0x27FFFF, CRAM 0x280000-0x28FFFF)
+    /// should be routed through external VDP coprocessor when vdp_routing is enabled.
+    /// This returns 0xFF for those regions when routing is enabled.
     pub fn read_u8(&self, addr: u32) -> u8 {
         let addr = addr & 0x00FF_FFFF; // Mask to 24-bit
-        
+
         match addr {
             // WorkRAM: 0x000000..0x00FFFF
-            a if a < Self::EXPANDED_RAM_BASE => {
-                self.workram[a as usize]
-            }
+            a if a < Self::EXPANDED_RAM_BASE => self.workram[a as usize],
             // ExpandedRAM: 0x010000..0x03FFFF
             a if a >= Self::EXPANDED_RAM_BASE && a < 0x040000 => {
                 let offset = (a - Self::EXPANDED_RAM_BASE) as usize;
                 self.expanded_ram[offset]
             }
             // I/O: 0x100000..0x10FFFF
+            // VDP-T I/O: 0x100000..0x103FFF (should be routed to VDP externally)
+            a if a >= Self::VDP_IO_BASE && a < Self::VDP_IO_BASE + 0x4000 => {
+                if self.vdp_routing {
+                    0xFF // Caller should route to VDP
+                } else {
+                    let offset = (a - Self::IO_BASE) as usize;
+                    self.io.get(offset).copied().unwrap_or(0xFF)
+                }
+            }
+            // Other I/O: VLU, APU, etc.
             a if a >= Self::IO_BASE && a < Self::IO_BASE + Self::IO_SIZE as u32 => {
                 let offset = (a - Self::IO_BASE) as usize;
-                self.io[offset]
+                self.io.get(offset).copied().unwrap_or(0xFF)
             }
-            // VRAM: 0x200000..0x27FFFF
+            // VRAM: 0x200000..0x27FFFF (should be routed to VDP externally)
             a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + Self::VRAM_SIZE as u32 => {
-                let offset = (a - Self::VRAM_BASE) as usize;
-                self.vram[offset]
+                if self.vdp_routing {
+                    0xFF // Caller should route to VDP
+                } else {
+                    let offset = (a - Self::VRAM_BASE) as usize;
+                    self.vram[offset]
+                }
             }
-            // CRAM: 0x280000..0x28FFFF
+            // CRAM: 0x280000..0x28FFFF (should be routed to VDP externally)
             a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + Self::CRAM_SIZE as u32 => {
-                let offset = (a - Self::CRAM_BASE) as usize;
-                self.cram[offset]
+                if self.vdp_routing {
+                    0xFF // Caller should route to VDP
+                } else {
+                    let offset = (a - Self::CRAM_BASE) as usize;
+                    self.cram[offset]
+                }
             }
             // CartROM: 0x400000..0x9FFFFF
-            a if a >= Self::CART_ROM_BASE && a < Self::CART_ROM_BASE + Self::CART_ROM_SIZE as u32 => {
+            a if a >= Self::CART_ROM_BASE
+                && a < Self::CART_ROM_BASE + Self::CART_ROM_SIZE as u32 =>
+            {
                 let offset = (a - Self::CART_ROM_BASE) as usize;
-                self.cart_rom[offset]
+                self.cart_rom.get(offset).copied().unwrap_or(0xFF)
             }
             // CartSave: 0xA00000..0xA3FFFF
-            a if a >= Self::CART_SAVE_BASE && a < Self::CART_SAVE_BASE + Self::CART_SAVE_SIZE as u32 => {
+            a if a >= Self::CART_SAVE_BASE
+                && a < Self::CART_SAVE_BASE + Self::CART_SAVE_SIZE as u32 =>
+            {
                 let offset = (a - Self::CART_SAVE_BASE) as usize;
-                self.cart_save[offset]
+                self.cart_save.get(offset).copied().unwrap_or(0xFF)
             }
             // BIOS: 0xFF0000..0xFFFFFF
             a if a >= Self::BIOS_BASE => {
@@ -120,9 +159,13 @@ impl Bus24 {
     }
 
     /// Write a byte to the 24-bit address space
+    ///
+    /// Note: VDP regions (I/O 0x100000-0x103FFF, VRAM 0x200000-0x27FFFF, CRAM 0x280000-0x28FFFF)
+    /// should be routed through external VDP coprocessor when vdp_routing is enabled.
+    /// Writes to those regions are ignored when routing is enabled.
     pub fn write_u8(&mut self, addr: u32, value: u8) {
         let addr = addr & 0x00FF_FFFF; // Mask to 24-bit
-        
+
         match addr {
             // WorkRAM: 0x000000..0x00FFFF
             a if a < Self::EXPANDED_RAM_BASE => {
@@ -133,29 +176,56 @@ impl Bus24 {
                 let offset = (a - Self::EXPANDED_RAM_BASE) as usize;
                 self.expanded_ram[offset] = value;
             }
-            // I/O: 0x100000..0x10FFFF
+            // VDP-T I/O: 0x100000..0x103FFF (should be routed to VDP externally)
+            a if a >= Self::VDP_IO_BASE && a < Self::VDP_IO_BASE + 0x4000 => {
+                if self.vdp_routing {
+                    // Caller should route to VDP, ignore here
+                } else {
+                    let offset = (a - Self::IO_BASE) as usize;
+                    if let Some(cell) = self.io.get_mut(offset) {
+                        *cell = value;
+                    }
+                }
+            }
+            // Other I/O: VLU, APU, etc.
             a if a >= Self::IO_BASE && a < Self::IO_BASE + Self::IO_SIZE as u32 => {
                 let offset = (a - Self::IO_BASE) as usize;
-                self.io[offset] = value;
+                if let Some(cell) = self.io.get_mut(offset) {
+                    *cell = value;
+                }
             }
-            // VRAM: 0x200000..0x27FFFF
+            // VRAM: 0x200000..0x27FFFF (should be routed to VDP externally)
             a if a >= Self::VRAM_BASE && a < Self::VRAM_BASE + Self::VRAM_SIZE as u32 => {
-                let offset = (a - Self::VRAM_BASE) as usize;
-                self.vram[offset] = value;
+                if !self.vdp_routing {
+                    let offset = (a - Self::VRAM_BASE) as usize;
+                    if let Some(cell) = self.vram.get_mut(offset) {
+                        *cell = value;
+                    }
+                }
             }
-            // CRAM: 0x280000..0x28FFFF
+            // CRAM: 0x280000..0x28FFFF (should be routed to VDP externally)
             a if a >= Self::CRAM_BASE && a < Self::CRAM_BASE + Self::CRAM_SIZE as u32 => {
-                let offset = (a - Self::CRAM_BASE) as usize;
-                self.cram[offset] = value;
+                if !self.vdp_routing {
+                    let offset = (a - Self::CRAM_BASE) as usize;
+                    if let Some(cell) = self.cram.get_mut(offset) {
+                        *cell = value;
+                    }
+                }
             }
             // CartROM: 0x400000..0x9FFFFF (read-only, writes ignored)
-            a if a >= Self::CART_ROM_BASE && a < Self::CART_ROM_BASE + Self::CART_ROM_SIZE as u32 => {
+            a if a >= Self::CART_ROM_BASE
+                && a < Self::CART_ROM_BASE + Self::CART_ROM_SIZE as u32 =>
+            {
                 // ROM is read-only, ignore writes
             }
             // CartSave: 0xA00000..0xA3FFFF
-            a if a >= Self::CART_SAVE_BASE && a < Self::CART_SAVE_BASE + Self::CART_SAVE_SIZE as u32 => {
+            a if a >= Self::CART_SAVE_BASE
+                && a < Self::CART_SAVE_BASE + Self::CART_SAVE_SIZE as u32 =>
+            {
                 let offset = (a - Self::CART_SAVE_BASE) as usize;
-                self.cart_save[offset] = value;
+                if let Some(cell) = self.cart_save.get_mut(offset) {
+                    *cell = value;
+                }
             }
             // BIOS: 0xFF0000..0xFFFFFF (read-only, writes ignored)
             a if a >= Self::BIOS_BASE => {
@@ -261,7 +331,7 @@ mod tests {
         // Load some test ROM data
         let rom_data = vec![0x12, 0x34, 0x56, 0x78];
         bus.load_cart_rom(&rom_data);
-        
+
         // Test CartROM region (0x400000..0x9FFFFF)
         assert_eq!(bus.read_u8(0x400000), 0x12);
         assert_eq!(bus.read_u8(0x400001), 0x34);
@@ -274,7 +344,7 @@ mod tests {
         let mut bus = Bus24::new();
         let rom_data = vec![0xFF; 4];
         bus.load_cart_rom(&rom_data);
-        
+
         // Try to write to ROM (should be ignored)
         bus.write_u8(0x400000, 0x00);
         assert_eq!(bus.read_u8(0x400000), 0xFF); // Should still be 0xFF
@@ -295,7 +365,7 @@ mod tests {
         let mut bus = Bus24::new();
         let bios_data = vec![0xAB, 0xCD, 0xEF, 0x01];
         bus.load_bios(&bios_data);
-        
+
         // Test BIOS region (0xFF0000..0xFFFFFF)
         assert_eq!(bus.read_u8(0xFF0000), 0xAB);
         assert_eq!(bus.read_u8(0xFF0001), 0xCD);
@@ -308,7 +378,7 @@ mod tests {
         let mut bus = Bus24::new();
         let bios_data = vec![0xFF; 4];
         bus.load_bios(&bios_data);
-        
+
         // Try to write to BIOS (should be ignored)
         bus.write_u8(0xFF0000, 0x00);
         assert_eq!(bus.read_u8(0xFF0000), 0xFF); // Should still be 0xFF
@@ -328,7 +398,7 @@ mod tests {
         let mut bus = Bus24::new();
         bus.write_u16(0x10, 0x1234);
         assert_eq!(bus.read_u16(0x10), 0x1234);
-        
+
         // Test little-endian byte order
         bus.write_u8(0x20, 0x78);
         bus.write_u8(0x21, 0x56);
@@ -340,7 +410,7 @@ mod tests {
         let mut bus = Bus24::new();
         bus.write_u24(0x100, 0x123456);
         assert_eq!(bus.read_u24(0x100), 0x123456);
-        
+
         // Test little-endian byte order
         bus.write_u8(0x200, 0x34);
         bus.write_u8(0x201, 0x12);

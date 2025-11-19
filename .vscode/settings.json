@@ -3,5 +3,6 @@
     "rust-analyzer.cargo.target": null,
     "github.copilot.chat.codesearch.enabled": true,
     "github.copilot.nextEditSuggestions.enabled": true,
-    "github.copilot.chat.executePrompt.enabled": true
+  "github.copilot.chat.executePrompt.enabled": true,
+  "makefile.makefilePath": "Makefile.toml"
 }

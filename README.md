@@ -73,7 +73,7 @@ fn main() {
 
 ### Memory Map
 
-```
+```text
 0x000000..0x00FFFF:  WorkRAM (64KB) - Primary stack/heap
 0x010000..0x03FFFF:  ExpandedRAM (192KB)
 0x100000..0x10FFFF:  I/O (64KB) - Memory-mapped coprocessors
@@ -124,7 +124,7 @@ The VDP-T (Tile/Sprite GPU) is the Nexel-24's graphics coprocessor, providing ti
 - **Background Layers**:
   - BG0: Affine-capable background with transformation support (planned)
   - BG1: Static tilemap background with scrolling (implemented)
-- **Sprite System**: 
+- **Sprite System**:
   - Up to 128 sprites on screen
   - Hardware limit of 64 sprites per scanline
   - Sizes: 8x8, 16x16, 32x32, 64x64
@@ -216,7 +216,7 @@ match vlu.compute(
 
 ## Repository Structure
 
-```
+```text
 src/
 ├── core/
 │   ├── mod.rs          - Core module exports

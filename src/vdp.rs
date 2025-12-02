@@ -1,3 +1,13 @@
+// Copyright (C) 2025 Dayton Fishell
+// Nexel-24 Game Console Emulator
+// This file is part of Nexel-24.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version. See the LICENSE file in the project root for details.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! VDP-T (Tile/Sprite GPU) subsystem
 //!
 //! The VDP-T is the Nexel-24's graphics coprocessor, providing:
@@ -105,6 +115,26 @@ bitflags! {
     }
 }
 
+bitflags! {
+    /// Sprite control flags (placeholder)
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub struct SpriteControl: u16 {
+        const ENABLE = 1 << 0; // Placeholder flag
+        const SIZE_16 = 1 << 1; // Placeholder
+    }
+}
+
+bitflags! {
+    /// IRQ enable/status flags
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub struct IrqFlags: u16 {
+        const HBLANK = 1 << 0;
+        const VBLANK = 1 << 1;
+        const LINECMP = 1 << 2;
+        const DMA_DONE = 1 << 3;
+    }
+}
+
 /// Sprite attribute entry (8 bytes in OAM)
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -202,11 +232,27 @@ pub struct Vdp {
     // Sprite OAM (Object Attribute Memory) - 128 sprites * 8 bytes
     oam: Vec<SpriteAttr>,
 
+    // Sprite and OAM control
+    sprite_control: SpriteControl,
+    sprite_oam_addr: u16,
+
     // DMA state
     dma_source: u32,
     dma_dest: u32,
     dma_length: u16,
     dma_active: bool,
+
+    // IRQ registers
+    irq_enable: IrqFlags,
+    irq_status: IrqFlags,
+    irq_line_compare: u16,
+
+    // Palette registers
+    palette_index: u8,
+    palette_data: u8,
+
+    // Backdrop color (cached 16-bit value)
+    backdrop_color: u16,
 
     // Framebuffer for rendering (384x288, 18-bit color stored as u32)
     framebuffer: Vec<u32>,
@@ -262,10 +308,18 @@ impl Vdp {
                 };
                 Self::OAM_SPRITES
             ],
+            sprite_control: SpriteControl::empty(),
+            sprite_oam_addr: 0,
             dma_source: 0,
             dma_dest: 0,
             dma_length: 0,
             dma_active: false,
+            irq_enable: IrqFlags::empty(),
+            irq_status: IrqFlags::empty(),
+            irq_line_compare: 0,
+            palette_index: 0,
+            palette_data: 0,
+            backdrop_color: 0,
             framebuffer: vec![0; Self::NATIVE_WIDTH * Self::NATIVE_HEIGHT],
             cycles: 0,
             frame_count: 0,
@@ -323,6 +377,24 @@ impl Vdp {
             0x0030 => self.bg1_control.bits(),
             0x0032 => self.bg1_scroll_x as u16,
             0x0034 => self.bg1_scroll_y as u16,
+            0x0036 => self.bg1_tilemap_addr as u16,
+            0x0050 => self.sprite_control.bits(),
+            0x0052 => self.sprite_oam_addr as u16,
+            0x0070 => (self.dma_source & 0xFFFF) as u16,
+            0x0072 => ((self.dma_source >> 16) & 0xFF) as u16,
+            0x0074 => (self.dma_dest & 0xFFFF) as u16,
+            0x0076 => ((self.dma_dest >> 16) & 0xFF) as u16,
+            0x0078 => self.dma_length,
+            0x007A => {
+                // DMA control - read as 0 (not used)
+                0
+            }
+            0x0080 => self.irq_enable.bits(),
+            0x0082 => self.irq_status.bits(),
+            0x0084 => self.irq_line_compare,
+            0x0090 => self.palette_index as u16,
+            0x0092 => self.palette_data as u16,
+            0x0094 => self.backdrop_color as u16,
             _ => {
                 // Default to reading from raw register array
                 let idx = (offset as usize) % self.regs.len();
@@ -375,6 +447,13 @@ impl Vdp {
             0x0032 => self.bg1_scroll_x = value as i16,
             0x0034 => self.bg1_scroll_y = value as i16,
             0x0036 => self.bg1_tilemap_addr = value as u32,
+            0x0050 => {
+                self.sprite_control = SpriteControl::from_bits_truncate(value);
+            }
+            0x0052 => {
+                // Sprite OAM base address
+                self.sprite_oam_addr = value as u16;
+            }
             0x0070 => {
                 // DMA source low word
                 self.dma_source = (self.dma_source & 0xFFFF0000) | value as u32;
@@ -397,6 +476,35 @@ impl Vdp {
                 if value & 0x8000 != 0 {
                     self.start_dma();
                 }
+            }
+            0x0080 => {
+                self.irq_enable = IrqFlags::from_bits_truncate(value);
+            }
+            0x0082 => {
+                // Writing to IRQ status clears bits specified
+                let mask = IrqFlags::from_bits_truncate(value);
+                self.irq_status.remove(mask);
+            }
+            0x0084 => {
+                self.irq_line_compare = value;
+            }
+            0x0090 => {
+                self.palette_index = value as u8;
+            }
+            0x0092 => {
+                self.palette_data = value as u8;
+                // Writing palette data stores into CRAM at current index
+                let idx = (self.palette_index as u32) * 3;
+                // For simplicity, write the low byte of value into the palette data
+                self.write_cram(idx, (self.palette_data & 0x3F) as u8);
+            }
+            0x0094 => {
+                self.backdrop_color = value;
+                // Also update CRAM[0..3] with 18-bit color
+                let r = (value & 0x3F) as u8;
+                let g = ((value >> 6) & 0x3F) as u8;
+                let b = ((value >> 12) & 0x3F) as u8;
+                self.set_backdrop_color(r, g, b);
             }
             _ => {
                 // Write to raw register array

@@ -1,3 +1,13 @@
+// Copyright (C) 2025 Dayton Fishell
+// Nexel-24 Game Console Emulator
+// This file is part of Nexel-24.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version. See the LICENSE file in the project root for details.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! APU-6 audio processor control registers and channel handling
 
 use bitflags::bitflags;
@@ -20,6 +30,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct EffectMask: u8 {
         const ECHO = 0x01;
         const CHORUS = 0x02;
@@ -155,9 +166,17 @@ impl Apu {
                 | ((value as u32) << 8),
             10 => channel.sample_address = (channel.sample_address & 0xFF00_FFFF)
                 | ((value as u32) << 16),
-            11 => channel.sample_length = (channel.sample_length & 0xFF00) | value as u16,
-            12 => {
+            11 => {
                 channel.sample_length = (channel.sample_length & 0x00FF) | ((value as u16) << 8);
+                if channel.sample_length == 0 && channel.enabled {
+                    channel.buffer_empty = true;
+                    self.buffer_empty_latch = true;
+                } else if channel.sample_length != 0 {
+                    channel.buffer_empty = false;
+                }
+            }
+            12 => {
+                channel.sample_length = (channel.sample_length & 0xFF00) | value as u16;
                 if channel.sample_length == 0 && channel.enabled {
                     channel.buffer_empty = true;
                     self.buffer_empty_latch = true;
@@ -198,8 +217,8 @@ impl Apu {
             8 => (channel.sample_address & 0xFF) as u8,
             9 => ((channel.sample_address >> 8) & 0xFF) as u8,
             10 => ((channel.sample_address >> 16) & 0xFF) as u8,
-            11 => (channel.sample_length & 0x00FF) as u8,
-            12 => (channel.sample_length >> 8) as u8,
+            11 => (channel.sample_length >> 8) as u8,
+            12 => (channel.sample_length & 0x00FF) as u8,
             _ => 0xFF,
         }
     }

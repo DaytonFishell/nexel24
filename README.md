@@ -273,6 +273,8 @@ cargo test vdp      # VDP tests only
 - [x] Complete VDP-T affine transformation for BG0 layer
 - [x] Implement VLU-24 vector operations
 - [x] Add APU-6 audio channel control
+- [ ] NRAW-ASM (native assembly language). Required for BIOS and other native-level access.
+- [ ] Nexel-24 BIOS.
 - [ ] Baseplate VM bytecode interpreter
 - [ ] Add continuous integration workflow
 - [ ] Implement more CPU addressing modes

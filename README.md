@@ -40,6 +40,47 @@ This will execute a simple demo program that demonstrates the CPU's capabilities
 cargo run --example vdp_demo
 ```
 
+## Native Assembly (NRAW)
+
+NRAW is the Nexel-24's native assembly language. The emulator exposes a simple assembler via `nexel_core::nraw::assemble` that understands the current CPU instruction set, label declarations, and relative branches. The result exposes the assembled bytes as well as label offsets so you can wire up reset vectors or data tables.
+
+```rust
+use nexel_core::{Nexel24, nraw::assemble};
+
+let mut emulator = Nexel24::new();
+let program = assemble(r#"
+start:
+    LDA #0x1234
+    HLT
+"#)?;
+let program = assemble(r#"
+start:
+    LDA #0x1234
+    HLT
+"#).expect("assemble");
+
+let mut bios = vec![0xFF; 0x10000];
+bios[..program.bytes.len()].copy_from_slice(&program.bytes);
+emulator.load_bios(&bios);
+emulator.reset();
+```
+
+Use `program.labels` to inspect branch targets or data offsets when you need to bake jump tables or install interrupt vectors.
+
+## Nexel-24 BIOS
+
+The emulator ships with a tiny BIOS image built from the same NRAW assembler above. Call `Nexel24::load_default_bios()` before `reset()` to initialize the standard vector table and entry point instead of providing your own ROM.
+
+```rust
+use nexel_core::Nexel24;
+
+let mut emulator = Nexel24::new();
+emulator.load_default_bios();
+emulator.reset();
+```
+
+The built-in BIOS simply enables interrupts and loops forever, but it provides a working vector table so you can start from the stock ROM or extend it with your own routines.
+
 This demonstrates the VDP-T graphics coprocessor, including display modes, palette loading, sprite configuration, and VRAM/CRAM access.
 
 ## Usage
@@ -225,6 +266,8 @@ src/
 ├── vdp.rs              - VDP-T GPU implementation
 ├── vlu.rs              - VLU-24 vector coprocessor
 ├── apu.rs              - APU-6 audio processor (stub)
+├── bios.rs             - Built-in BIOS image generator
+├── nraw.rs             - NRAW native assembler helper
 ├── vm.rs               - Baseplate VM (stub)
 ├── bytecode.rs         - Baseplate bytecode module loader (stub)
 ├── emulator.rs         - Main emulator integration

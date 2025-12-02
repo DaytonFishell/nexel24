@@ -14,19 +14,23 @@
 //! including CPU, memory bus, and coprocessor subsystems.
 
 pub mod apu;
+pub mod bios;
 pub mod bytecode;
 pub mod core;
 pub mod cpu;
 pub mod emulator;
+pub mod nraw;
 pub mod vdp;
 pub mod vlu;
 pub mod vm; // <--- added module declaration
 
 pub use apu::Apu;
+pub use bios::default_bios;
 // Re-export commonly used types
 pub use core::Bus24;
 pub use cpu::Cpu;
 pub use emulator::{EmulatorStats, Nexel24};
+pub use nraw::{AsmError, AssembledProgram, assemble};
 pub use vdp::Vdp;
 pub use vlu::Vlu;
 pub use vm::BaseplateVm;

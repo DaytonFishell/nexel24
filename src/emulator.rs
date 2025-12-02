@@ -14,6 +14,7 @@
 //! memory bus, and coprocessors.
 
 use crate::apu::Apu;
+use crate::bios::default_bios;
 use crate::core::Bus24;
 use crate::cpu::Cpu;
 use crate::vdp::Vdp;
@@ -63,6 +64,11 @@ impl Nexel24 {
     pub fn reset(&mut self) {
         self.cpu.reset(&self.bus);
         self.frame_count = 0;
+    }
+
+    /// Load the built-in BIOS image.
+    pub fn load_default_bios(&mut self) {
+        self.load_bios(&default_bios());
     }
 
     /// Access the shared APU instance.

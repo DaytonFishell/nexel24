@@ -22,25 +22,44 @@ pub enum AsmError {
 enum InstructionKind {
     Nop,
     Lda,
+    LdaAbs,
     Sta,
     Ldx,
+    LdxAbs,
     Stx,
     Ldy,
+    LdyAbs,
     Sty,
     Add,
     Sub,
     And,
     Or,
     Xor,
+    Mul,
+    Div,
+    Mov,
+    Inc,
+    Dec,
+    Bit,
+    Bset,
+    Bclr,
     Jmp,
     Jsr,
     Rts,
     Bra,
     Beq,
     Bne,
+    Bcs,
+    Bcc,
+    Bmi,
+    Bpl,
+    Bvs,
+    Bvc,
     Sei,
     Cli,
     Rti,
+    Wfi,
+    Cop,
     Hlt,
 }
 
@@ -106,28 +125,84 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             });
         }
 
+        // Determine addressing mode for load instructions based on operand prefix
         let kind = match name.as_str() {
             "NOP" => InstructionKind::Nop,
-            "LDA" => InstructionKind::Lda,
+            "LDA" => {
+                if let Some(op_text) = operand_text {
+                    if op_text.starts_with('#') {
+                        InstructionKind::Lda
+                    } else {
+                        InstructionKind::LdaAbs
+                    }
+                } else {
+                    return Err(AsmError::MissingOperand {
+                        line: line_idx + 1,
+                        instruction: name.clone(),
+                    });
+                }
+            }
+            "LDX" => {
+                if let Some(op_text) = operand_text {
+                    if op_text.starts_with('#') {
+                        InstructionKind::Ldx
+                    } else {
+                        InstructionKind::LdxAbs
+                    }
+                } else {
+                    return Err(AsmError::MissingOperand {
+                        line: line_idx + 1,
+                        instruction: name.clone(),
+                    });
+                }
+            }
+            "LDY" => {
+                if let Some(op_text) = operand_text {
+                    if op_text.starts_with('#') {
+                        InstructionKind::Ldy
+                    } else {
+                        InstructionKind::LdyAbs
+                    }
+                } else {
+                    return Err(AsmError::MissingOperand {
+                        line: line_idx + 1,
+                        instruction: name.clone(),
+                    });
+                }
+            }
             "STA" => InstructionKind::Sta,
-            "LDX" => InstructionKind::Ldx,
             "STX" => InstructionKind::Stx,
-            "LDY" => InstructionKind::Ldy,
             "STY" => InstructionKind::Sty,
             "ADD" => InstructionKind::Add,
             "SUB" => InstructionKind::Sub,
             "AND" => InstructionKind::And,
             "OR" => InstructionKind::Or,
             "XOR" => InstructionKind::Xor,
+            "MUL" => InstructionKind::Mul,
+            "DIV" => InstructionKind::Div,
+            "MOV" => InstructionKind::Mov,
+            "INC" => InstructionKind::Inc,
+            "DEC" => InstructionKind::Dec,
+            "BIT" => InstructionKind::Bit,
+            "BSET" => InstructionKind::Bset,
+            "BCLR" => InstructionKind::Bclr,
             "JMP" => InstructionKind::Jmp,
             "JSR" => InstructionKind::Jsr,
             "RTS" => InstructionKind::Rts,
             "BRA" => InstructionKind::Bra,
             "BEQ" => InstructionKind::Beq,
             "BNE" => InstructionKind::Bne,
+            "BCS" => InstructionKind::Bcs,
+            "BCC" => InstructionKind::Bcc,
+            "BMI" => InstructionKind::Bmi,
+            "BPL" => InstructionKind::Bpl,
+            "BVS" => InstructionKind::Bvs,
+            "BVC" => InstructionKind::Bvc,
             "SEI" => InstructionKind::Sei,
             "CLI" => InstructionKind::Cli,
             "RTI" => InstructionKind::Rti,
+            "WFI" => InstructionKind::Wfi,
+            "COP" => InstructionKind::Cop,
             "HLT" => InstructionKind::Hlt,
             _ => {
                 return Err(AsmError::UnknownInstruction {
@@ -143,6 +218,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             | InstructionKind::Sei
             | InstructionKind::Cli
             | InstructionKind::Rti
+            | InstructionKind::Wfi
             | InstructionKind::Hlt => {
                 if operand_text.is_some() {
                     return Err(AsmError::UnexpectedOperand {
@@ -159,7 +235,13 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             | InstructionKind::Sub
             | InstructionKind::And
             | InstructionKind::Or
-            | InstructionKind::Xor => {
+            | InstructionKind::Xor
+            | InstructionKind::Mul
+            | InstructionKind::Div
+            | InstructionKind::Bit
+            | InstructionKind::Bset
+            | InstructionKind::Bclr
+            | InstructionKind::Cop => {
                 let operand_text = operand_text.ok_or(AsmError::MissingOperand {
                     line: line_idx + 1,
                     instruction: name.clone(),
@@ -173,7 +255,10 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                 let raw = operand_text[1..].trim();
                 Some(Operand::Value(parse_number(raw, line_idx + 1)?))
             }
-            InstructionKind::Sta
+            InstructionKind::LdaAbs
+            | InstructionKind::LdxAbs
+            | InstructionKind::LdyAbs
+            | InstructionKind::Sta
             | InstructionKind::Stx
             | InstructionKind::Sty
             | InstructionKind::Jmp
@@ -188,7 +273,15 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                     Some(Operand::Label(operand_text.to_string()))
                 }
             }
-            InstructionKind::Bra | InstructionKind::Beq | InstructionKind::Bne => {
+            InstructionKind::Bra 
+            | InstructionKind::Beq 
+            | InstructionKind::Bne
+            | InstructionKind::Bcs
+            | InstructionKind::Bcc
+            | InstructionKind::Bmi
+            | InstructionKind::Bpl
+            | InstructionKind::Bvs
+            | InstructionKind::Bvc => {
                 let operand_text = operand_text.ok_or(AsmError::MissingOperand {
                     line: line_idx + 1,
                     instruction: name.clone(),
@@ -198,6 +291,15 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                 } else {
                     Some(Operand::Label(operand_text.to_string()))
                 }
+            }
+            InstructionKind::Mov | InstructionKind::Inc | InstructionKind::Dec => {
+                // These take register names as operands, stored as values
+                let operand_text = operand_text.ok_or(AsmError::MissingOperand {
+                    line: line_idx + 1,
+                    instruction: name.clone(),
+                })?;
+                // Store register encoding as operand value
+                Some(Operand::Value(parse_register(operand_text, line_idx + 1)?))
             }
         };
 
@@ -232,20 +334,38 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             InstructionKind::Rti => {
                 bytes.push(0x42);
             }
+            InstructionKind::Wfi => {
+                bytes.push(0x43);
+            }
             InstructionKind::Lda => {
                 bytes.push(0x01);
                 let value = operand_value(&inst, &labels)? as u16;
                 bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::LdaAbs => {
+                bytes.push(0x07);
+                let addr = operand_address(&inst, &labels)?;
+                bytes.extend_from_slice(&addr.to_le_bytes()[..3]);
             }
             InstructionKind::Ldx => {
                 bytes.push(0x03);
                 let value = operand_value(&inst, &labels)? as u16;
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
+            InstructionKind::LdxAbs => {
+                bytes.push(0x08);
+                let addr = operand_address(&inst, &labels)?;
+                bytes.extend_from_slice(&addr.to_le_bytes()[..3]);
+            }
             InstructionKind::Ldy => {
                 bytes.push(0x05);
                 let value = operand_value(&inst, &labels)? as u16;
                 bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::LdyAbs => {
+                bytes.push(0x09);
+                let addr = operand_address(&inst, &labels)?;
+                bytes.extend_from_slice(&addr.to_le_bytes()[..3]);
             }
             InstructionKind::Add => {
                 bytes.push(0x10);
@@ -272,6 +392,51 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                 let value = operand_value(&inst, &labels)? as u16;
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
+            InstructionKind::Mul => {
+                bytes.push(0x15);
+                let value = operand_value(&inst, &labels)? as u16;
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::Div => {
+                bytes.push(0x16);
+                let value = operand_value(&inst, &labels)? as u16;
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::Mov => {
+                bytes.push(0x17);
+                let reg_spec = operand_value(&inst, &labels)? as u8;
+                bytes.push(reg_spec);
+            }
+            InstructionKind::Inc => {
+                bytes.push(0x18);
+                let reg_spec = operand_value(&inst, &labels)? as u8;
+                bytes.push(reg_spec);
+            }
+            InstructionKind::Dec => {
+                bytes.push(0x19);
+                let reg_spec = operand_value(&inst, &labels)? as u8;
+                bytes.push(reg_spec);
+            }
+            InstructionKind::Bit => {
+                bytes.push(0x1A);
+                let value = operand_value(&inst, &labels)? as u16;
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::Bset => {
+                bytes.push(0x1B);
+                let value = operand_value(&inst, &labels)? as u16;
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::Bclr => {
+                bytes.push(0x1C);
+                let value = operand_value(&inst, &labels)? as u16;
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            InstructionKind::Cop => {
+                bytes.push(0x44);
+                let cmd = operand_value(&inst, &labels)? as u8;
+                bytes.push(cmd);
+            }
             InstructionKind::Sta => {
                 bytes.push(0x02);
                 let addr = operand_address(&inst, &labels)?;
@@ -297,11 +462,25 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                 let addr = operand_address(&inst, &labels)?;
                 bytes.extend_from_slice(&addr.to_le_bytes()[..3]);
             }
-            InstructionKind::Bra | InstructionKind::Beq | InstructionKind::Bne => {
+            InstructionKind::Bra 
+            | InstructionKind::Beq 
+            | InstructionKind::Bne
+            | InstructionKind::Bcs
+            | InstructionKind::Bcc
+            | InstructionKind::Bmi
+            | InstructionKind::Bpl
+            | InstructionKind::Bvs
+            | InstructionKind::Bvc => {
                 let opcode = match inst.kind {
                     InstructionKind::Bra => 0x30,
                     InstructionKind::Beq => 0x31,
                     InstructionKind::Bne => 0x32,
+                    InstructionKind::Bcs => 0x33,
+                    InstructionKind::Bcc => 0x34,
+                    InstructionKind::Bmi => 0x35,
+                    InstructionKind::Bpl => 0x36,
+                    InstructionKind::Bvs => 0x37,
+                    InstructionKind::Bvc => 0x38,
                     _ => unreachable!(),
                 };
                 bytes.push(opcode);
@@ -333,6 +512,28 @@ fn parse_number(token: &str, line: usize) -> Result<u32, AsmError> {
     }
 }
 
+fn parse_register(token: &str, line: usize) -> Result<u32, AsmError> {
+    let upper = token.to_uppercase();
+    match upper.as_str() {
+        "A" => Ok(0),
+        "X" => Ok(1),
+        "Y" => Ok(2),
+        "SP" => Ok(3),
+        "R0" => Ok(4),
+        "R1" => Ok(5),
+        "R2" => Ok(6),
+        "R3" => Ok(7),
+        "R4" => Ok(8),
+        "R5" => Ok(9),
+        "R6" => Ok(10),
+        "R7" => Ok(11),
+        _ => Err(AsmError::InvalidNumber {
+            line,
+            operand: token.to_string(),
+        }),
+    }
+}
+
 fn instruction_length(kind: &InstructionKind) -> u32 {
     match kind {
         InstructionKind::Nop
@@ -340,7 +541,25 @@ fn instruction_length(kind: &InstructionKind) -> u32 {
         | InstructionKind::Sei
         | InstructionKind::Cli
         | InstructionKind::Rti
+        | InstructionKind::Wfi
         | InstructionKind::Hlt => 1,
+        // Branch instructions: 1 byte opcode + 1 byte signed offset
+        InstructionKind::Bra
+        | InstructionKind::Beq
+        | InstructionKind::Bne
+        | InstructionKind::Bcs
+        | InstructionKind::Bcc
+        | InstructionKind::Bmi
+        | InstructionKind::Bpl
+        | InstructionKind::Bvs
+        | InstructionKind::Bvc => 2,
+        // Register operations: 1 byte opcode + 1 byte register spec
+        InstructionKind::Inc
+        | InstructionKind::Dec
+        | InstructionKind::Mov => 2,
+        // Coprocessor instruction: 1 byte opcode + 1 byte command
+        InstructionKind::Cop => 2,
+        // Immediate mode instructions: 1 byte opcode + 2 bytes for 16-bit immediate
         InstructionKind::Lda
         | InstructionKind::Ldx
         | InstructionKind::Ldy
@@ -349,10 +568,16 @@ fn instruction_length(kind: &InstructionKind) -> u32 {
         | InstructionKind::And
         | InstructionKind::Or
         | InstructionKind::Xor
-        | InstructionKind::Bra
-        | InstructionKind::Beq
-        | InstructionKind::Bne => 2,
-        InstructionKind::Sta
+        | InstructionKind::Mul
+        | InstructionKind::Div
+        | InstructionKind::Bit
+        | InstructionKind::Bset
+        | InstructionKind::Bclr => 3,
+        // Absolute addressing: 1 byte opcode + 3 bytes for 24-bit address
+        InstructionKind::LdaAbs
+        | InstructionKind::LdxAbs
+        | InstructionKind::LdyAbs
+        | InstructionKind::Sta
         | InstructionKind::Stx
         | InstructionKind::Sty
         | InstructionKind::Jmp
@@ -427,11 +652,14 @@ data:
 
     #[test]
     fn branch_out_of_range_error() {
-        let source = r#"
-start:
-    BRA far
-"#;
-        let result = assemble(source);
+        // Create a program where the branch target is more than 127 bytes away
+        let mut source = String::from("start:\n    BRA far\n");
+        // Add enough NOPs to make 'far' label unreachable (>127 bytes away)
+        for _ in 0..130 {
+            source.push_str("    NOP\n");
+        }
+        source.push_str("far:\n    NOP\n");
+        let result = assemble(&source);
         assert!(matches!(result, Err(AsmError::BranchOutOfRange { .. })));
     }
 }

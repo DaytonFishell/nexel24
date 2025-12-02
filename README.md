@@ -42,7 +42,12 @@ cargo run --example vdp_demo
 
 ## Native Assembly (NRAW)
 
-NRAW is the Nexel-24's native assembly language. The emulator exposes a simple assembler via `nexel_core::nraw::assemble` that understands the current CPU instruction set, label declarations, and relative branches. The result exposes the assembled bytes as well as label offsets so you can wire up reset vectors or data tables.
+NRAW is the Nexel-24's native assembly language. The emulator includes a comprehensive assembler via `nexel_core::nraw::assemble` that supports:
+
+- **Complete instruction set**: All core and extension instructions
+- **Label declarations and references**: For code organization and jumps
+- **Multiple addressing modes**: Immediate (#), absolute, and relative
+- **Register operations**: MOV, INC, DEC with register names (A, X, Y, SP, R0-R7)
 
 ```rust
 use nexel_core::{Nexel24, nraw::assemble};
@@ -51,12 +56,11 @@ let mut emulator = Nexel24::new();
 let program = assemble(r#"
 start:
     LDA #0x1234
+    ADD #0x0010
+    STA result
     HLT
-"#)?;
-let program = assemble(r#"
-start:
-    LDA #0x1234
-    HLT
+result:
+    NOP
 "#).expect("assemble");
 
 let mut bios = vec![0xFF; 0x10000];
@@ -67,9 +71,22 @@ emulator.reset();
 
 Use `program.labels` to inspect branch targets or data offsets when you need to bake jump tables or install interrupt vectors.
 
+### NRAW Calling Convention
+
+The emulator follows a standard calling convention for function calls. See [`docs/CALLING_CONVENTION.md`](docs/CALLING_CONVENTION.md) for details on:
+- Register usage (caller-saved vs callee-saved)
+- Parameter passing (first 4 in R0-R3, rest on stack)
+- Return values (A register for 16-bit, A:X for 32-bit)
+- Stack frame layout
+
 ## Nexel-24 BIOS
 
-The emulator ships with a tiny BIOS image built from the same NRAW assembler above. Call `Nexel24::load_default_bios()` before `reset()` to initialize the standard vector table and entry point instead of providing your own ROM.
+The emulator ships with a functional BIOS image built from NRAW that provides:
+
+- **System initialization**: Sets up VDP and interrupts
+- **Interrupt vector table**: Pre-configured handlers for all interrupt sources
+- **System call interface**: BIOS functions accessible via JSR 0xFF0100
+- **Cartridge boot**: Automatically detects and boots cartridge ROMs
 
 ```rust
 use nexel_core::Nexel24;
@@ -77,11 +94,21 @@ use nexel_core::Nexel24;
 let mut emulator = Nexel24::new();
 emulator.load_default_bios();
 emulator.reset();
+// BIOS initializes system and boots cartridge if present
 ```
 
-The built-in BIOS simply enables interrupts and loops forever, but it provides a working vector table so you can start from the stock ROM or extend it with your own routines.
+### BIOS Features
 
-This demonstrates the VDP-T graphics coprocessor, including display modes, palette loading, sprite configuration, and VRAM/CRAM access.
+The built-in BIOS provides:
+- Interrupt handler framework (NMI, HBLANK, VLU_DONE, APU_BUF_EMPTY, etc.)
+- System calls for common operations:
+  - Syscall 0: Get BIOS version
+  - Syscall 1: Wait for VBlank
+  - Syscall 2: Delay loop
+- Automatic cartridge detection and boot (jumps to 0x400000)
+- VDP initialization with display enabled
+
+See [`docs/BIOS_API.md`](docs/BIOS_API.md) for complete BIOS API documentation.
 
 ## Usage
 
@@ -127,6 +154,10 @@ fn main() {
 
 ## Implemented CPU Instructions
 
+The HXC-24 CPU now supports a comprehensive instruction set including core and extension instructions:
+
+### Core Instructions
+
 | Opcode | Mnemonic | Description | Cycles |
 |--------|----------|-------------|--------|
 | 0x00   | NOP      | No operation | 1 |
@@ -136,6 +167,9 @@ fn main() {
 | 0x04   | STX addr | Store X register (absolute) | 3 |
 | 0x05   | LDY #imm | Load Y register (immediate) | 2 |
 | 0x06   | STY addr | Store Y register (absolute) | 3 |
+| 0x07   | LDA addr | Load accumulator (absolute) | 4 |
+| 0x08   | LDX addr | Load X register (absolute) | 4 |
+| 0x09   | LDY addr | Load Y register (absolute) | 4 |
 | 0x10   | ADD #imm | Add to accumulator | 2 |
 | 0x11   | SUB #imm | Subtract from accumulator | 2 |
 | 0x12   | AND #imm | Logical AND | 2 |
@@ -150,7 +184,28 @@ fn main() {
 | 0x40   | SEI      | Set interrupt disable | 1 |
 | 0x41   | CLI      | Clear interrupt disable | 1 |
 | 0x42   | RTI      | Return from interrupt | 5 |
+| 0x44   | COP #imm | Coprocessor instruction | 3 |
 | 0xFF   | HLT      | Halt processor | 1 |
+
+### Extension Instructions
+
+| Opcode | Mnemonic | Description | Cycles |
+|--------|----------|-------------|--------|
+| 0x15   | MUL #imm | Multiply (result in A:X) | 4 |
+| 0x16   | DIV #imm | Divide (quotient in A, remainder in X) | 2-12 |
+| 0x17   | MOV reg  | Move between registers | 2 |
+| 0x18   | INC reg  | Increment register | 2 |
+| 0x19   | DEC reg  | Decrement register | 2 |
+| 0x1A   | BIT #imm | Test bits | 2 |
+| 0x1B   | BSET #imm| Set bits in accumulator | 2 |
+| 0x1C   | BCLR #imm| Clear bits in accumulator | 2 |
+| 0x33   | BCS rel  | Branch if carry set | 2-3 |
+| 0x34   | BCC rel  | Branch if carry clear | 2-3 |
+| 0x35   | BMI rel  | Branch if minus/negative | 2-3 |
+| 0x36   | BPL rel  | Branch if plus/positive | 2-3 |
+| 0x37   | BVS rel  | Branch if overflow set | 2-3 |
+| 0x38   | BVC rel  | Branch if overflow clear | 2-3 |
+| 0x43   | WFI      | Wait for interrupt | 1 |
 
 ## VDP-T Graphics Coprocessor
 
@@ -316,18 +371,29 @@ cargo test vdp      # VDP tests only
 - [x] Complete VDP-T affine transformation for BG0 layer
 - [x] Implement VLU-24 vector operations
 - [x] Add APU-6 audio channel control
-- [ ] NRAW-ASM (native assembly language). Required for BIOS and other native-level access.
-- [ ] Nexel-24 BIOS.
+- [x] NRAW assembler (native assembly language) with complete instruction set
+- [x] NRAW calling convention documentation
+- [x] Nexel-24 BIOS with interrupt handlers and system calls
+- [x] Complete CPU instruction set (core + extensions)
+- [ ] Assembler directives (.org, .db, .dw, .ascii, etc.)
 - [ ] Baseplate VM bytecode interpreter
 - [ ] Add continuous integration workflow
-- [ ] Implement more CPU addressing modes
+- [ ] Implement indexed/indirect addressing modes
 - [ ] Implement VDP-T DMA transfers
 
 APU-6 channel registers are now routed through the bus layer, and the emulator drives the coprocessor so buffer-empty interrupts reach the CPU interrupt queue.
 
+## Documentation
+
+- **[CALLING_CONVENTION.md](docs/CALLING_CONVENTION.md)**: NRAW calling convention and function call protocol
+- **[BIOS_API.md](docs/BIOS_API.md)**: BIOS system calls and interrupt handlers reference
+- **[VLU_REFERENCE.md](docs/VLU_REFERENCE.md)**: VLU-24 vector coprocessor operations
+- **[VDP_QUICK_REFERENCE.md](docs/VDP_QUICK_REFERENCE.md)**: VDP-T graphics coprocessor quick reference
+- **[VDP_IMPLEMENTATION.md](docs/VDP_IMPLEMENTATION.md)**: VDP-T implementation details
+
 ## Specifications
 
-See `nexel24_spec.json`, `baseplate_bytecode_schema.yaml`, and `docs/VLU_REFERENCE.md` for detailed hardware specifications and subsystem references.
+See `nexel24_spec.json`, `baseplate_bytecode_schema.yaml`, and documentation files for detailed hardware specifications and subsystem references.
 
 ## License
 

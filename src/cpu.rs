@@ -298,6 +298,33 @@ impl Cpu {
                 self.cycles += 3;
             }
 
+            // LDA - Load Accumulator (absolute 24-bit address)
+            0x07 => {
+                let addr = bus.read_u24(self.pc);
+                self.pc = self.pc.wrapping_add(3);
+                self.a = bus.read_u16(addr);
+                self.sr.update_zn(self.a);
+                self.cycles += 4;
+            }
+
+            // LDX - Load X register (absolute 24-bit address)
+            0x08 => {
+                let addr = bus.read_u24(self.pc);
+                self.pc = self.pc.wrapping_add(3);
+                self.x = bus.read_u16(addr);
+                self.sr.update_zn(self.x);
+                self.cycles += 4;
+            }
+
+            // LDY - Load Y register (absolute 24-bit address)
+            0x09 => {
+                let addr = bus.read_u24(self.pc);
+                self.pc = self.pc.wrapping_add(3);
+                self.y = bus.read_u16(addr);
+                self.sr.update_zn(self.y);
+                self.cycles += 4;
+            }
+
             // ADD - Add to accumulator (immediate 16-bit)
             0x10 => {
                 let value = bus.read_u16(self.pc);
@@ -346,6 +373,129 @@ impl Cpu {
                 let value = bus.read_u16(self.pc);
                 self.pc = self.pc.wrapping_add(2);
                 self.a ^= value;
+                self.sr.update_zn(self.a);
+                self.cycles += 2;
+            }
+
+            // MUL - Multiply accumulator (immediate 16-bit)
+            0x15 => {
+                let value = bus.read_u16(self.pc);
+                self.pc = self.pc.wrapping_add(2);
+                let result = (self.a as u32).wrapping_mul(value as u32);
+                self.a = (result & 0xFFFF) as u16;
+                // Store high word in X register
+                self.x = ((result >> 16) & 0xFFFF) as u16;
+                self.sr.update_zn(self.a);
+                self.cycles += 4;
+            }
+
+            // DIV - Divide accumulator (immediate 16-bit)
+            0x16 => {
+                let value = bus.read_u16(self.pc);
+                self.pc = self.pc.wrapping_add(2);
+                if value == 0 {
+                    // Division by zero - set carry flag and leave A unchanged
+                    self.sr.carry = true;
+                    self.cycles += 2;
+                } else {
+                    let quotient = self.a / value;
+                    let remainder = self.a % value;
+                    self.a = quotient;
+                    self.x = remainder;
+                    self.sr.carry = false;
+                    self.sr.update_zn(self.a);
+                    self.cycles += 12;
+                }
+            }
+
+            // MOV - Move between registers (2 byte instruction: opcode + reg spec)
+            0x17 => {
+                let reg_spec = bus.read_u8(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                let src = (reg_spec >> 4) & 0x0F;
+                let dst = reg_spec & 0x0F;
+                
+                let value = match src {
+                    0 => self.a,
+                    1 => self.x,
+                    2 => self.y,
+                    3 => self.sp,
+                    4..=11 => self.r[(src - 4) as usize],
+                    _ => 0,
+                };
+                
+                match dst {
+                    0 => { self.a = value; self.sr.update_zn(self.a); }
+                    1 => { self.x = value; self.sr.update_zn(self.x); }
+                    2 => { self.y = value; self.sr.update_zn(self.y); }
+                    3 => self.sp = value,
+                    4..=11 => { self.r[(dst - 4) as usize] = value; }
+                    _ => {}
+                }
+                self.cycles += 2;
+            }
+
+            // INC - Increment register (2 byte instruction: opcode + reg spec)
+            0x18 => {
+                let reg_spec = bus.read_u8(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                
+                match reg_spec {
+                    0 => { self.a = self.a.wrapping_add(1); self.sr.update_zn(self.a); }
+                    1 => { self.x = self.x.wrapping_add(1); self.sr.update_zn(self.x); }
+                    2 => { self.y = self.y.wrapping_add(1); self.sr.update_zn(self.y); }
+                    3 => self.sp = self.sp.wrapping_add(1),
+                    4..=11 => { 
+                        let idx = (reg_spec - 4) as usize;
+                        self.r[idx] = self.r[idx].wrapping_add(1); 
+                    }
+                    _ => {}
+                }
+                self.cycles += 2;
+            }
+
+            // DEC - Decrement register (2 byte instruction: opcode + reg spec)
+            0x19 => {
+                let reg_spec = bus.read_u8(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                
+                match reg_spec {
+                    0 => { self.a = self.a.wrapping_sub(1); self.sr.update_zn(self.a); }
+                    1 => { self.x = self.x.wrapping_sub(1); self.sr.update_zn(self.x); }
+                    2 => { self.y = self.y.wrapping_sub(1); self.sr.update_zn(self.y); }
+                    3 => self.sp = self.sp.wrapping_sub(1),
+                    4..=11 => { 
+                        let idx = (reg_spec - 4) as usize;
+                        self.r[idx] = self.r[idx].wrapping_sub(1); 
+                    }
+                    _ => {}
+                }
+                self.cycles += 2;
+            }
+
+            // BIT - Test bits (immediate 16-bit)
+            0x1A => {
+                let value = bus.read_u16(self.pc);
+                self.pc = self.pc.wrapping_add(2);
+                let result = self.a & value;
+                self.sr.update_zn(result);
+                self.cycles += 2;
+            }
+
+            // BSET - Set bits in accumulator (immediate 16-bit)
+            0x1B => {
+                let value = bus.read_u16(self.pc);
+                self.pc = self.pc.wrapping_add(2);
+                self.a |= value;
+                self.sr.update_zn(self.a);
+                self.cycles += 2;
+            }
+
+            // BCLR - Clear bits in accumulator (immediate 16-bit)
+            0x1C => {
+                let value = bus.read_u16(self.pc);
+                self.pc = self.pc.wrapping_add(2);
+                self.a &= !value;
                 self.sr.update_zn(self.a);
                 self.cycles += 2;
             }
@@ -408,6 +558,78 @@ impl Cpu {
                 }
             }
 
+            // BCS - Branch if carry set
+            0x33 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if self.sr.carry {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
+            // BCC - Branch if carry clear
+            0x34 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if !self.sr.carry {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
+            // BMI - Branch if minus/negative
+            0x35 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if self.sr.negative {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
+            // BPL - Branch if plus/positive
+            0x36 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if !self.sr.negative {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
+            // BVS - Branch if overflow set
+            0x37 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if self.sr.overflow {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
+            // BVC - Branch if overflow clear
+            0x38 => {
+                let offset = bus.read_u8(self.pc) as i8 as i32;
+                self.pc = self.pc.wrapping_add(1);
+                if !self.sr.overflow {
+                    self.pc = self.pc.wrapping_add(offset as u32);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+
             // SEI - Set interrupt disable
             0x40 => {
                 self.sr.interrupt_disable = true;
@@ -425,6 +647,29 @@ impl Cpu {
                 self.pc = self.pop_u24(bus);
                 self.sr.interrupt_disable = false;
                 self.cycles += 5; // Pop takes cycles, similar to RTS
+            }
+
+            // WFI - Wait for interrupt
+            0x43 => {
+                // Wait for interrupt: CPU idles until an interrupt occurs
+                // We model this by not incrementing PC but allowing interrupt handling
+                // If no interrupts are pending, this effectively halts until one arrives
+                if self.pending_interrupts.is_empty() {
+                    // No interrupts pending - stay at this instruction
+                    self.pc = self.pc.wrapping_sub(1);
+                }
+                self.cycles += 1;
+            }
+
+            // COP - Coprocessor instruction (1 byte opcode + 1 byte coprocessor command)
+            0x44 => {
+                let cop_cmd = bus.read_u8(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                // Coprocessor commands are handled through memory-mapped I/O
+                // This instruction is mainly for triggering coprocessor operations
+                // The actual coprocessor work is done through bus writes
+                // For now, this is a placeholder that just consumes the operand
+                self.cycles += 3;
             }
 
             // HLT - Halt CPU

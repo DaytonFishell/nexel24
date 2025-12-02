@@ -8,6 +8,8 @@
 // (at your option) any later version. See the LICENSE file in the project root for details.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::apu::Apu;
+
 /// 24-bit address bus with full memory map support
 ///
 /// Memory Map (per Nexel-24 specification):
@@ -34,6 +36,7 @@ pub struct Bus24 {
     cram: Vec<u8>, // 0x280000..0x28FFFF (64KB)
     // VDP is handled separately via routing since it has its own VRAM/CRAM
     vdp_routing: bool, // When true, route VDP regions to external VDP
+    apu: Apu,          // Shared APU-6 coprocessor state
 }
 
 impl Bus24 {
@@ -54,6 +57,7 @@ impl Bus24 {
     pub const VDP_IO_BASE: u32 = 0x100000; // VDP-T registers within I/O
     pub const VLU_IO_BASE: u32 = 0x108000; // VLU-24 within I/O
     pub const APU_IO_BASE: u32 = 0x10C000; // APU-6 within I/O
+    pub const APU_IO_SIZE: u32 = 0x4000;
     pub const VRAM_BASE: u32 = 0x200000;
     pub const CRAM_BASE: u32 = 0x280000;
     pub const CART_ROM_BASE: u32 = 0x400000;
@@ -71,7 +75,18 @@ impl Bus24 {
             vram: vec![0; Self::VRAM_SIZE],
             cram: vec![0; Self::CRAM_SIZE],
             vdp_routing: false,
+            apu: Apu::new(),
         }
+    }
+
+    /// Access the shared APU-6 coprocessor state.
+    pub fn apu(&self) -> &Apu {
+        &self.apu
+    }
+
+    /// Mutable access to the shared APU-6 coprocessor state.
+    pub fn apu_mut(&mut self) -> &mut Apu {
+        &mut self.apu
     }
 
     /// Enable VDP routing for external VDP coprocessor
@@ -117,7 +132,12 @@ impl Bus24 {
                     self.io.get(offset).copied().unwrap_or(0xFF)
                 }
             }
-            // Other I/O: VLU, APU, etc.
+            // APU-6 coprocessor: 0x10C000..0x10FFFF
+            a if a >= Self::APU_IO_BASE && a < Self::APU_IO_BASE + Self::APU_IO_SIZE => {
+                let offset = a - Self::APU_IO_BASE;
+                self.apu.read_register(offset)
+            }
+            // Other I/O: VLU, etc.
             a if a >= Self::IO_BASE && a < Self::IO_BASE + Self::IO_SIZE as u32 => {
                 let offset = (a - Self::IO_BASE) as usize;
                 self.io.get(offset).copied().unwrap_or(0xFF)
@@ -197,7 +217,12 @@ impl Bus24 {
                     }
                 }
             }
-            // Other I/O: VLU, APU, etc.
+            // APU-6 coprocessor: 0x10C000..0x10FFFF
+            a if a >= Self::APU_IO_BASE && a < Self::APU_IO_BASE + Self::APU_IO_SIZE => {
+                let offset = a - Self::APU_IO_BASE;
+                self.apu.write_register(offset, value);
+            }
+            // Other I/O: VLU, etc.
             a if a >= Self::IO_BASE && a < Self::IO_BASE + Self::IO_SIZE as u32 => {
                 let offset = (a - Self::IO_BASE) as usize;
                 if let Some(cell) = self.io.get_mut(offset) {
@@ -311,8 +336,29 @@ mod tests {
         // Test I/O region (0x100000..0x10FFFF)
         bus.write_u8(0x100000, 0x55);
         assert_eq!(bus.read_u8(0x100000), 0x55);
-        bus.write_u8(0x10FFFF, 0xAA);
-        assert_eq!(bus.read_u8(0x10FFFF), 0xAA);
+        bus.write_u8(0x10BFFF, 0xAA);
+        assert_eq!(bus.read_u8(0x10BFFF), 0xAA);
+    }
+
+    #[test]
+    fn bus_apu_registers_are_routed() {
+        let mut bus = Bus24::new();
+        // Enable channel 0 via APU register window
+        bus.write_u8(Bus24::APU_IO_BASE, 0x01);
+        assert_eq!(bus.read_u8(Bus24::APU_IO_BASE) & 0x01, 0x01);
+        assert_eq!((bus.read_u8(Bus24::APU_IO_BASE) >> 1) & 0x03, 0x00);
+    }
+
+    #[test]
+    fn bus_apu_buffer_empty_latch() {
+        let mut bus = Bus24::new();
+        bus.write_u8(Bus24::APU_IO_BASE, 0x01);
+        bus.write_u8(Bus24::APU_IO_BASE + 11, 0x00);
+        bus.write_u8(Bus24::APU_IO_BASE + 12, 0x01);
+        assert_eq!(bus.read_u8(Bus24::APU_IO_BASE + 3) & 0x01, 0x00);
+        bus.apu_mut().step(64);
+        assert!(bus.apu_mut().take_buffer_empty());
+        assert_eq!(bus.read_u8(Bus24::APU_IO_BASE + 3) & 0x01, 0x01);
     }
 
     #[test]

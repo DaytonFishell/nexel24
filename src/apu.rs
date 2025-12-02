@@ -162,10 +162,14 @@ impl Apu {
             5 => channel.frequency = (channel.frequency & 0x00FF) | ((value as u16) << 8),
             6 => channel.effect = EffectMask::from_bits_truncate(value),
             8 => channel.sample_address = (channel.sample_address & 0xFFFF_FF00) | value as u32,
-            9 => channel.sample_address = (channel.sample_address & 0xFFFF_00FF)
-                | ((value as u32) << 8),
-            10 => channel.sample_address = (channel.sample_address & 0xFF00_FFFF)
-                | ((value as u32) << 16),
+            9 => {
+                channel.sample_address =
+                    (channel.sample_address & 0xFFFF_00FF) | ((value as u32) << 8)
+            }
+            10 => {
+                channel.sample_address =
+                    (channel.sample_address & 0xFF00_FFFF) | ((value as u32) << 16)
+            }
             11 => {
                 channel.sample_length = (channel.sample_length & 0x00FF) | ((value as u16) << 8);
                 if channel.sample_length == 0 && channel.enabled {

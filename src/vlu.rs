@@ -107,7 +107,11 @@ impl Mat3 {
     }
 
     fn mul_vec(self, vec: Vec3) -> Vec3 {
-        Vec3::new(self.rows[0].dot(vec), self.rows[1].dot(vec), self.rows[2].dot(vec))
+        Vec3::new(
+            self.rows[0].dot(vec),
+            self.rows[1].dot(vec),
+            self.rows[2].dot(vec),
+        )
     }
 }
 
@@ -123,11 +127,7 @@ pub enum VluJob {
     /// Compute the dot product of vectors `a` and `b`.
     Dot { a: usize, b: usize },
     /// Compute the cross product of `a` × `b` storing into `dest`.
-    Cross {
-        dest: usize,
-        a: usize,
-        b: usize,
-    },
+    Cross { dest: usize, a: usize, b: usize },
     /// Normalize vector `src` and write it into `dest`.
     Normalize { dest: usize, src: usize },
 }
@@ -343,9 +343,7 @@ mod tests {
         vlu.set_vector(0, [1.0, 3.0, -5.0]).unwrap();
         vlu.set_vector(1, [4.0, -2.0, -1.0]).unwrap();
 
-        let result = vlu
-            .compute(&mut cpu, VluJob::Dot { a: 0, b: 1 })
-            .unwrap();
+        let result = vlu.compute(&mut cpu, VluJob::Dot { a: 0, b: 1 }).unwrap();
 
         assert_eq!(result, VluResult::Scalar(3.0));
         assert_eq!(vlu.scalar_result(), 3.0);
@@ -380,10 +378,7 @@ mod tests {
         vlu.set_vector(0, [0.0, 0.0, 0.0]).unwrap();
 
         let result = vlu
-            .compute(
-                &mut cpu,
-                VluJob::Normalize { dest: 1, src: 0 },
-            )
+            .compute(&mut cpu, VluJob::Normalize { dest: 1, src: 0 })
             .unwrap();
 
         assert_eq!(result, VluResult::Vector([0.0, 0.0, 0.0]));

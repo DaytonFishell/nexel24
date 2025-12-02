@@ -26,7 +26,6 @@ pub struct Nexel24 {
     pub bus: Bus24,
     pub vdp: Vdp,
     pub vlu: Vlu,
-    pub apu: Apu,
     pub vm: Option<BaseplateVm>,
 
     // Frame timing
@@ -54,7 +53,6 @@ impl Nexel24 {
             bus,
             vdp: Vdp::new(),
             vlu: Vlu::new(),
-            apu: Apu::new(),
             vm: None,
             frame_count: 0,
             target_cycles_per_frame: Self::CYCLES_PER_FRAME,
@@ -65,6 +63,16 @@ impl Nexel24 {
     pub fn reset(&mut self) {
         self.cpu.reset(&self.bus);
         self.frame_count = 0;
+    }
+
+    /// Access the shared APU instance.
+    pub fn apu(&self) -> &Apu {
+        self.bus.apu()
+    }
+
+    /// Mutable access to the shared APU instance.
+    pub fn apu_mut(&mut self) -> &mut Apu {
+        self.bus.apu_mut()
     }
 
     /// Load a BIOS ROM
@@ -79,11 +87,13 @@ impl Nexel24 {
 
     /// Execute a single CPU instruction with VDP routing
     pub fn step(&mut self) {
+        let cycles_before = self.cpu.cycles;
         self.cpu.step(&mut self.bus);
+        let cycles_elapsed = self.cpu.cycles - cycles_before;
 
         // VDP runs in parallel, advance it by the same number of cycles
-        // TODO: Properly track cycles per instruction
-        self.vdp.step(1);
+        self.vdp.step(cycles_elapsed);
+        self.advance_apu(cycles_elapsed);
     }
 
     /// Execute instructions for one frame (approximately 307,200 cycles at 60 FPS)
@@ -99,6 +109,8 @@ impl Nexel24 {
             // Advance VDP by the same number of cycles
             let vblank_triggered = self.vdp.step(cycles_elapsed);
 
+            self.advance_apu(cycles_elapsed);
+
             // TODO: Handle VBLANK interrupt
             if vblank_triggered && self.vdp.in_vblank() {
                 // Trigger VBLANK interrupt to CPU if enabled
@@ -106,6 +118,18 @@ impl Nexel24 {
         }
 
         self.frame_count += 1;
+    }
+
+    /// Advance the APU by the given number of CPU cycles and raise interrupts.
+    fn advance_apu(&mut self, cycles: u64) {
+        if cycles == 0 {
+            return;
+        }
+        let apu = self.bus.apu_mut();
+        apu.step(cycles);
+        if apu.take_buffer_empty() {
+            self.cpu.request_interrupt(3);
+        }
     }
 
     /// Read from memory with VDP routing
@@ -388,5 +412,17 @@ mod tests {
 
         // VDP should have advanced
         assert!(emu.vdp.frame_count() > initial_frame_count || emu.cpu.halted);
+    }
+
+    #[test]
+    fn apu_buffer_empty_triggers_interrupt() {
+        let mut emu = Nexel24::new();
+        emu.write_memory(Bus24::APU_IO_BASE, 0x01);
+        emu.write_memory(Bus24::APU_IO_BASE + 11, 0x00);
+        emu.write_memory(Bus24::APU_IO_BASE + 12, 0x01);
+
+        emu.step();
+
+        assert!(emu.cpu.pending_interrupts.contains(&3));
     }
 }

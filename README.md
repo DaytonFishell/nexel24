@@ -272,11 +272,13 @@ cargo test vdp      # VDP tests only
 - [x] Add VDP-T register interface and basic rendering
 - [x] Complete VDP-T affine transformation for BG0 layer
 - [x] Implement VLU-24 vector operations
-- [ ] Add APU-6 audio channel control
+- [x] Add APU-6 audio channel control
 - [ ] Baseplate VM bytecode interpreter
 - [ ] Add continuous integration workflow
 - [ ] Implement more CPU addressing modes
 - [ ] Implement VDP-T DMA transfers
+
+APU-6 channel registers are now routed through the bus layer, and the emulator drives the coprocessor so buffer-empty interrupts reach the CPU interrupt queue.
 
 ## Specifications
 

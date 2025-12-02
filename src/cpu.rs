@@ -663,12 +663,14 @@ impl Cpu {
 
             // COP - Coprocessor instruction (1 byte opcode + 1 byte coprocessor command)
             0x44 => {
-                let cop_cmd = bus.read_u8(self.pc);
+                let _cop_cmd = bus.read_u8(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                // Coprocessor commands are handled through memory-mapped I/O
-                // This instruction is mainly for triggering coprocessor operations
-                // The actual coprocessor work is done through bus writes
-                // For now, this is a placeholder that just consumes the operand
+                // Coprocessor commands are handled through memory-mapped I/O.
+                // This instruction serves as a synchronization point for coprocessor operations.
+                // Actual coprocessor work is done through direct bus writes to coprocessor
+                // register addresses (VDP: 0x100000, VLU: 0x108000, APU: 0x10C000).
+                // The COP instruction can be extended in the future to trigger specific
+                // coprocessor operations based on the command byte.
                 self.cycles += 3;
             }
 

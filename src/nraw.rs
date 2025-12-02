@@ -298,7 +298,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
                     line: line_idx + 1,
                     instruction: name.clone(),
                 })?;
-                // For now, just store as a simple value (register encoding)
+                // Store register encoding as operand value
                 Some(Operand::Value(parse_register(operand_text, line_idx + 1)?))
             }
         };
@@ -552,12 +552,13 @@ fn instruction_length(kind: &InstructionKind) -> u32 {
         | InstructionKind::Bmi
         | InstructionKind::Bpl
         | InstructionKind::Bvs
-        | InstructionKind::Bvc
+        | InstructionKind::Bvc => 2,
         // Register operations: 1 byte opcode + 1 byte register spec
-        | InstructionKind::Inc
+        InstructionKind::Inc
         | InstructionKind::Dec
-        | InstructionKind::Mov
-        | InstructionKind::Cop => 2,
+        | InstructionKind::Mov => 2,
+        // Coprocessor instruction: 1 byte opcode + 1 byte command
+        InstructionKind::Cop => 2,
         // Immediate mode instructions: 1 byte opcode + 2 bytes for 16-bit immediate
         InstructionKind::Lda
         | InstructionKind::Ldx

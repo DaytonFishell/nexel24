@@ -29,7 +29,7 @@ enum AddressingMode {
 }
 
 #[derive(Debug)]
-enum InstructionKind {
+enum Opcode {
     Nop,
     Lda,
     Sta,
@@ -69,6 +69,10 @@ enum InstructionKind {
     Wfi,
     Cop,
     Hlt,
+    Org,
+    Db,
+    Dw,
+    Ascii,
 }
 
 enum Operand {
@@ -78,7 +82,7 @@ enum Operand {
 }
 
 struct RawInstruction {
-    kind: InstructionKind,
+    kind: Opcode,
     operand: Option<Operand>,
     address: u32,
     line: usize,
@@ -134,45 +138,45 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             .collect();
 
         let kind = match name.as_str() {
-            "NOP" => InstructionKind::Nop,
-            "LDA" => InstructionKind::Lda,
-            "LDX" => InstructionKind::Ldx,
-            "LDY" => InstructionKind::Ldy,
-            "STA" => InstructionKind::Sta,
-            "STX" => InstructionKind::Stx,
-            "STY" => InstructionKind::Sty,
-            "ADD" => InstructionKind::Add,
-            "SUB" => InstructionKind::Sub,
-            "CMP" => InstructionKind::Cmp,
-            "AND" => InstructionKind::And,
-            "OR" => InstructionKind::Or,
-            "XOR" => InstructionKind::Xor,
-            "MUL" => InstructionKind::Mul,
-            "DIV" => InstructionKind::Div,
-            "MOV" => InstructionKind::Mov,
-            "INC" => InstructionKind::Inc,
-            "DEC" => InstructionKind::Dec,
-            "BIT" => InstructionKind::Bit,
-            "BSET" => InstructionKind::Bset,
-            "BCLR" => InstructionKind::Bclr,
-            "JMP" => InstructionKind::Jmp,
-            "JSR" => InstructionKind::Jsr,
-            "RTS" => InstructionKind::Rts,
-            "BRA" => InstructionKind::Bra,
-            "BEQ" => InstructionKind::Beq,
-            "BNE" => InstructionKind::Bne,
-            "BCS" => InstructionKind::Bcs,
-            "BCC" => InstructionKind::Bcc,
-            "BMI" => InstructionKind::Bmi,
-            "BPL" => InstructionKind::Bpl,
-            "BVS" => InstructionKind::Bvs,
-            "BVC" => InstructionKind::Bvc,
-            "SEI" => InstructionKind::Sei,
-            "CLI" => InstructionKind::Cli,
-            "RTI" => InstructionKind::Rti,
-            "WFI" => InstructionKind::Wfi,
-            "COP" => InstructionKind::Cop,
-            "HLT" => InstructionKind::Hlt,
+            "NOP" => Opcode::Nop,
+            "LDA" => Opcode::Lda,
+            "LDX" => Opcode::Ldx,
+            "LDY" => Opcode::Ldy,
+            "STA" => Opcode::Sta,
+            "STX" => Opcode::Stx,
+            "STY" => Opcode::Sty,
+            "ADD" => Opcode::Add,
+            "SUB" => Opcode::Sub,
+            "CMP" => Opcode::Cmp,
+            "AND" => Opcode::And,
+            "OR" => Opcode::Or,
+            "XOR" => Opcode::Xor,
+            "MUL" => Opcode::Mul,
+            "DIV" => Opcode::Div,
+            "MOV" => Opcode::Mov,
+            "INC" => Opcode::Inc,
+            "DEC" => Opcode::Dec,
+            "BIT" => Opcode::Bit,
+            "BSET" => Opcode::Bset,
+            "BCLR" => Opcode::Bclr,
+            "JMP" => Opcode::Jmp,
+            "JSR" => Opcode::Jsr,
+            "RTS" => Opcode::Rts,
+            "BRA" => Opcode::Bra,
+            "BEQ" => Opcode::Beq,
+            "BNE" => Opcode::Bne,
+            "BCS" => Opcode::Bcs,
+            "BCC" => Opcode::Bcc,
+            "BMI" => Opcode::Bmi,
+            "BPL" => Opcode::Bpl,
+            "BVS" => Opcode::Bvs,
+            "BVC" => Opcode::Bvc,
+            "SEI" => Opcode::Sei,
+            "CLI" => Opcode::Cli,
+            "RTI" => Opcode::Rti,
+            "WFI" => Opcode::Wfi,
+            "COP" => Opcode::Cop,
+            "HLT" => Opcode::Hlt,
             _ => {
                 return Err(AsmError::UnknownInstruction {
                     line: line_idx + 1,
@@ -253,7 +257,7 @@ fn parse_addressing_mode(token: &str, line: usize) -> Result<AddressingMode, Asm
 }
 
 fn parse_operands(
-    kind: &InstructionKind,
+    kind: &Opcode,
     operand_parts: &[&str],
     line: usize,
 ) -> Result<Option<Operand>, AsmError> {
@@ -261,13 +265,13 @@ fn parse_operands(
     
     match kind {
         // No operand instructions
-        InstructionKind::Nop
-        | InstructionKind::Rts
-        | InstructionKind::Sei
-        | InstructionKind::Cli
-        | InstructionKind::Rti
-        | InstructionKind::Wfi
-        | InstructionKind::Hlt => {
+        Opcode::Nop
+        | Opcode::Rts
+        | Opcode::Sei
+        | Opcode::Cli
+        | Opcode::Rti
+        | Opcode::Wfi
+        | Opcode::Hlt => {
             if !operand_parts.is_empty() {
                 return Err(AsmError::UnexpectedOperand {
                     line,
@@ -278,7 +282,7 @@ fn parse_operands(
         }
         
         // Two-operand instructions: MOV src, dst
-        InstructionKind::Mov => {
+        Opcode::Mov => {
             if operand_parts.len() != 2 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -291,7 +295,7 @@ fn parse_operands(
         }
         
         // Single register operand: INC reg, DEC reg
-        InstructionKind::Inc | InstructionKind::Dec => {
+        Opcode::Inc | Opcode::Dec => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -303,8 +307,8 @@ fn parse_operands(
         }
         
         // Load/store instructions: can be immediate, absolute, indirect, or register (for indirect)
-        InstructionKind::Lda | InstructionKind::Ldx | InstructionKind::Ldy |
-        InstructionKind::Sta | InstructionKind::Stx | InstructionKind::Sty => {
+        Opcode::Lda | Opcode::Ldx | Opcode::Ldy |
+        Opcode::Sta | Opcode::Stx | Opcode::Sty => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -328,10 +332,10 @@ fn parse_operands(
         }
         
         // Arithmetic/logic instructions: can take register or immediate
-        InstructionKind::Add | InstructionKind::Sub | InstructionKind::Cmp |
-        InstructionKind::And | InstructionKind::Or | InstructionKind::Xor | InstructionKind::Mul |
-        InstructionKind::Div | InstructionKind::Bit |
-        InstructionKind::Bset | InstructionKind::Bclr => {
+        Opcode::Add | Opcode::Sub | Opcode::Cmp |
+        Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Mul |
+        Opcode::Div | Opcode::Bit |
+        Opcode::Bset | Opcode::Bclr => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -343,7 +347,7 @@ fn parse_operands(
         }
         
         // Jump/call instructions: absolute address or label
-        InstructionKind::Jmp | InstructionKind::Jsr => {
+        Opcode::Jmp | Opcode::Jsr => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -362,9 +366,9 @@ fn parse_operands(
         }
         
         // Branch instructions: relative offset or label
-        InstructionKind::Bra | InstructionKind::Beq | InstructionKind::Bne |
-        InstructionKind::Bcs | InstructionKind::Bcc | InstructionKind::Bmi |
-        InstructionKind::Bpl | InstructionKind::Bvs | InstructionKind::Bvc => {
+        Opcode::Bra | Opcode::Beq | Opcode::Bne |
+        Opcode::Bcs | Opcode::Bcc | Opcode::Bmi |
+        Opcode::Bpl | Opcode::Bvs | Opcode::Bvc => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -383,7 +387,7 @@ fn parse_operands(
         }
         
         // Coprocessor instruction
-        InstructionKind::Cop => {
+        Opcode::Cop => {
             if operand_parts.len() != 1 {
                 return Err(AsmError::MissingOperand {
                     line,
@@ -437,30 +441,30 @@ fn parse_register(token: &str, line: usize) -> Result<u8, AsmError> {
     }
 }
 
-fn instruction_length(kind: &InstructionKind, operand: &Option<Operand>) -> u32 {
+fn instruction_length(kind: &Opcode, operand: &Option<Operand>) -> u32 {
     match kind {
-        InstructionKind::Nop
-        | InstructionKind::Rts
-        | InstructionKind::Sei
-        | InstructionKind::Cli
-        | InstructionKind::Rti
-        | InstructionKind::Wfi
-        | InstructionKind::Hlt => 1,
+        Opcode::Nop
+        | Opcode::Rts
+        | Opcode::Sei
+        | Opcode::Cli
+        | Opcode::Rti
+        | Opcode::Wfi
+        | Opcode::Hlt => 1,
         
         // Branch instructions: 1 byte opcode + 1 byte signed offset
-        InstructionKind::Bra | InstructionKind::Beq | InstructionKind::Bne |
-        InstructionKind::Bcs | InstructionKind::Bcc | InstructionKind::Bmi |
-        InstructionKind::Bpl | InstructionKind::Bvs | InstructionKind::Bvc => 2,
+        Opcode::Bra | Opcode::Beq | Opcode::Bne |
+        Opcode::Bcs | Opcode::Bcc | Opcode::Bmi |
+        Opcode::Bpl | Opcode::Bvs | Opcode::Bvc => 2,
         
         // Register operations and coprocessor: variable based on operand
-        InstructionKind::Inc | InstructionKind::Dec | InstructionKind::Cop => 2,
+        Opcode::Inc | Opcode::Dec | Opcode::Cop => 2,
         
         // MOV can be 2 or 3 bytes depending on addressing mode
-        InstructionKind::Mov => 3, // opcode + src_reg + dst_reg
+        Opcode::Mov => 3, // opcode + src_reg + dst_reg
         
         // Load/store instructions: depends on addressing mode
-        InstructionKind::Lda | InstructionKind::Ldx | InstructionKind::Ldy |
-        InstructionKind::Sta | InstructionKind::Stx | InstructionKind::Sty => {
+        Opcode::Lda | Opcode::Ldx | Opcode::Ldy |
+        Opcode::Sta | Opcode::Stx | Opcode::Sty => {
             match operand {
                 Some(Operand::Single(AddressingMode::Immediate(_))) => 3,
                 Some(Operand::Single(AddressingMode::Absolute(_))) | Some(Operand::Label(_)) => 4,
@@ -471,10 +475,10 @@ fn instruction_length(kind: &InstructionKind, operand: &Option<Operand>) -> u32 
         }
         
         // Arithmetic instructions: typically immediate (3 bytes) or register (2 bytes)
-        InstructionKind::Add | InstructionKind::Sub | InstructionKind::Cmp |
-        InstructionKind::And | InstructionKind::Or | InstructionKind::Xor | InstructionKind::Mul |
-        InstructionKind::Div | InstructionKind::Bit |
-        InstructionKind::Bset | InstructionKind::Bclr => {
+        Opcode::Add | Opcode::Sub | Opcode::Cmp |
+        Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Mul |
+        Opcode::Div | Opcode::Bit |
+        Opcode::Bset | Opcode::Bclr => {
             match operand {
                 Some(Operand::Single(AddressingMode::Immediate(_))) => 3,
                 Some(Operand::Single(AddressingMode::Register(_))) => 2,
@@ -483,7 +487,7 @@ fn instruction_length(kind: &InstructionKind, operand: &Option<Operand>) -> u32 
         }
         
         // Jump/call: 1 byte opcode + 3 bytes for 24-bit address
-        InstructionKind::Jmp | InstructionKind::Jsr => 4,
+        Opcode::Jmp | Opcode::Jsr => 4,
     }
 }
 
@@ -493,39 +497,39 @@ fn encode_instruction(
     bytes: &mut Vec<u8>,
 ) -> Result<(), AsmError> {
     match inst.kind {
-        InstructionKind::Nop => bytes.push(0x00),
-        InstructionKind::Hlt => bytes.push(0xFF),
-        InstructionKind::Rts => bytes.push(0x22),
-        InstructionKind::Sei => bytes.push(0x40),
-        InstructionKind::Cli => bytes.push(0x41),
-        InstructionKind::Rti => bytes.push(0x42),
-        InstructionKind::Wfi => bytes.push(0x43),
+        Opcode::Nop => bytes.push(0x00),
+        Opcode::Hlt => bytes.push(0xFF),
+        Opcode::Rts => bytes.push(0x22),
+        Opcode::Sei => bytes.push(0x40),
+        Opcode::Cli => bytes.push(0x41),
+        Opcode::Rti => bytes.push(0x42),
+        Opcode::Wfi => bytes.push(0x43),
         
-        InstructionKind::Lda => encode_load_store(0x01, 0x07, 0x0A, inst, labels, bytes)?,
-        InstructionKind::Ldx => encode_load_store(0x03, 0x08, 0x0B, inst, labels, bytes)?,
-        InstructionKind::Ldy => encode_load_store(0x05, 0x09, 0x0C, inst, labels, bytes)?,
-        InstructionKind::Sta => encode_load_store(0x02, 0x02, 0x0D, inst, labels, bytes)?,
-        InstructionKind::Stx => encode_load_store(0x04, 0x04, 0x0E, inst, labels, bytes)?,
-        InstructionKind::Sty => encode_load_store(0x06, 0x06, 0x0F, inst, labels, bytes)?,
+        Opcode::Lda => encode_load_store(0x01, 0x07, 0x0A, inst, labels, bytes)?,
+        Opcode::Ldx => encode_load_store(0x03, 0x08, 0x0B, inst, labels, bytes)?,
+        Opcode::Ldy => encode_load_store(0x05, 0x09, 0x0C, inst, labels, bytes)?,
+        Opcode::Sta => encode_load_store(0x02, 0x02, 0x0D, inst, labels, bytes)?,
+        Opcode::Stx => encode_load_store(0x04, 0x04, 0x0E, inst, labels, bytes)?,
+        Opcode::Sty => encode_load_store(0x06, 0x06, 0x0F, inst, labels, bytes)?,
         
-        InstructionKind::Add => encode_arithmetic(0x10, inst, labels, bytes)?,
-        InstructionKind::Sub => encode_arithmetic(0x11, inst, labels, bytes)?,
-        InstructionKind::Cmp => encode_arithmetic(0x12, inst, labels, bytes)?,
-        InstructionKind::And => encode_arithmetic(0x13, inst, labels, bytes)?,
-        InstructionKind::Or => encode_arithmetic(0x14, inst, labels, bytes)?,
-        InstructionKind::Xor => encode_arithmetic(0x15, inst, labels, bytes)?,
-        InstructionKind::Mul => encode_arithmetic(0x16, inst, labels, bytes)?,
-        InstructionKind::Div => encode_arithmetic(0x17, inst, labels, bytes)?,
+        Opcode::Add => encode_arithmetic(0x10, inst, labels, bytes)?,
+        Opcode::Sub => encode_arithmetic(0x11, inst, labels, bytes)?,
+        Opcode::Cmp => encode_arithmetic(0x12, inst, labels, bytes)?,
+        Opcode::And => encode_arithmetic(0x13, inst, labels, bytes)?,
+        Opcode::Or => encode_arithmetic(0x14, inst, labels, bytes)?,
+        Opcode::Xor => encode_arithmetic(0x15, inst, labels, bytes)?,
+        Opcode::Mul => encode_arithmetic(0x16, inst, labels, bytes)?,
+        Opcode::Div => encode_arithmetic(0x17, inst, labels, bytes)?,
         
-        InstructionKind::Mov => encode_mov(inst, bytes)?,
-        InstructionKind::Inc => encode_single_reg(0x18, inst, bytes)?,
-        InstructionKind::Dec => encode_single_reg(0x19, inst, bytes)?,
+        Opcode::Mov => encode_mov(inst, bytes)?,
+        Opcode::Inc => encode_single_reg(0x18, inst, bytes)?,
+        Opcode::Dec => encode_single_reg(0x19, inst, bytes)?,
         
-        InstructionKind::Bit => encode_arithmetic(0x1A, inst, labels, bytes)?,
-        InstructionKind::Bset => encode_arithmetic(0x1B, inst, labels, bytes)?,
-        InstructionKind::Bclr => encode_arithmetic(0x1C, inst, labels, bytes)?,
+        Opcode::Bit => encode_arithmetic(0x1A, inst, labels, bytes)?,
+        Opcode::Bset => encode_arithmetic(0x1B, inst, labels, bytes)?,
+        Opcode::Bclr => encode_arithmetic(0x1C, inst, labels, bytes)?,
         
-        InstructionKind::Cop => {
+        Opcode::Cop => {
             bytes.push(0x44);
             if let Some(Operand::Single(AddressingMode::Immediate(val))) = &inst.operand {
                 bytes.push(*val as u8);
@@ -537,18 +541,18 @@ fn encode_instruction(
             }
         }
         
-        InstructionKind::Jmp => encode_jump(0x20, inst, labels, bytes)?,
-        InstructionKind::Jsr => encode_jump(0x21, inst, labels, bytes)?,
+        Opcode::Jmp => encode_jump(0x20, inst, labels, bytes)?,
+        Opcode::Jsr => encode_jump(0x21, inst, labels, bytes)?,
         
-        InstructionKind::Bra => encode_branch(0x30, inst, labels, bytes)?,
-        InstructionKind::Beq => encode_branch(0x31, inst, labels, bytes)?,
-        InstructionKind::Bne => encode_branch(0x32, inst, labels, bytes)?,
-        InstructionKind::Bcs => encode_branch(0x33, inst, labels, bytes)?,
-        InstructionKind::Bcc => encode_branch(0x34, inst, labels, bytes)?,
-        InstructionKind::Bmi => encode_branch(0x35, inst, labels, bytes)?,
-        InstructionKind::Bpl => encode_branch(0x36, inst, labels, bytes)?,
-        InstructionKind::Bvs => encode_branch(0x37, inst, labels, bytes)?,
-        InstructionKind::Bvc => encode_branch(0x38, inst, labels, bytes)?,
+        Opcode::Bra => encode_branch(0x30, inst, labels, bytes)?,
+        Opcode::Beq => encode_branch(0x31, inst, labels, bytes)?,
+        Opcode::Bne => encode_branch(0x32, inst, labels, bytes)?,
+        Opcode::Bcs => encode_branch(0x33, inst, labels, bytes)?,
+        Opcode::Bcc => encode_branch(0x34, inst, labels, bytes)?,
+        Opcode::Bmi => encode_branch(0x35, inst, labels, bytes)?,
+        Opcode::Bpl => encode_branch(0x36, inst, labels, bytes)?,
+        Opcode::Bvs => encode_branch(0x37, inst, labels, bytes)?,
+        Opcode::Bvc => encode_branch(0x38, inst, labels, bytes)?,
     }
     Ok(())
 }

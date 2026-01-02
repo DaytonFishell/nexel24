@@ -375,7 +375,7 @@ cargo test vdp      # VDP tests only
 - [x] NRAW calling convention documentation
 - [x] Nexel-24 BIOS with interrupt handlers and system calls
 - [x] Complete CPU instruction set (core + extensions)
-- [ ] Assembler directives (.org, .db, .dw, .ascii, etc.)
+- [x] Assembler directives (.org, .db, .dw, .ascii, etc.)
 - [ ] Baseplate VM bytecode interpreter
 - [ ] Add continuous integration workflow
 - [ ] Implement indexed/indirect addressing modes
